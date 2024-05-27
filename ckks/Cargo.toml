@@ -1,0 +1,14 @@
+[package]
+name = "ckks"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+astro-float = { workspace = true }
+itertools = { workspace = true }
+num-bigint = { workspace = true }
+num-complex = { workspace = true, features = ["rand"] }
+num-traits = { workspace = true }
+paste = { workspace = true }
+rand = { workspace = true }
+rand_distr = { workspace = true }
