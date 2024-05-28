@@ -1,6 +1,6 @@
 #[derive(Clone, Debug)]
 pub struct Matrix<T> {
-    width: usize,
+    height: usize,
     data: Vec<T>,
 }
 
@@ -10,16 +10,28 @@ impl<T> Matrix<T> {
         T: Clone + Default,
     {
         Self {
-            width,
+            height,
             data: vec![T::default(); width * height],
         }
     }
 
-    pub fn width(&self) -> usize {
-        self.width
+    pub fn height(&self) -> usize {
+        self.height
     }
 
-    pub fn height(&self) -> usize {
-        self.data.len() / self.width
+    pub fn width(&self) -> usize {
+        self.data.len() / self.height
+    }
+
+    pub fn cols_mut(&mut self) -> impl Iterator<Item = &mut [T]> {
+        self.data.chunks_exact_mut(self.height)
+    }
+
+    pub fn cols(&self) -> impl Iterator<Item = &[T]> {
+        self.data.chunks_exact(self.height)
+    }
+
+    pub fn rows(&self) -> impl Iterator<Item = impl Iterator<Item = &T>> {
+        (0..self.height()).map(|idx| self.data[idx..].iter().step_by(self.height()))
     }
 }

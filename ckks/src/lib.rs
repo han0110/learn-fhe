@@ -3,8 +3,13 @@
 use crate::{
     float::{BigFloat, Complex},
     mat::Matrix,
-    util::powers,
+    util::{bit_reverse, powers},
 };
+use itertools::{chain, izip, Itertools};
+use num_bigint::{BigInt, BigUint};
+use num_traits::ToPrimitive;
+use util::{rem_center, rem_euclid};
+
 use std::iter;
 
 pub mod float;
@@ -16,13 +21,52 @@ pub struct Ckks;
 
 #[derive(Clone, Debug)]
 pub struct CkksParam {
-    n: usize,
+    q: BigUint,
+    qs: Vec<u64>,
+    q_hats: Vec<BigUint>,
+    q_hat_invs: Vec<BigUint>,
+    log_n: usize,
+    log_scale: usize,
+    psi: Vec<Complex>,
+    pow5: Vec<usize>,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum CkksEncoding {
-    Coefficient,
-    Evaluation,
+impl CkksParam {
+    pub fn q(&self) -> &BigUint {
+        &self.q
+    }
+
+    pub fn qs(&self) -> &[u64] {
+        &self.qs
+    }
+
+    pub fn q_hats(&self) -> &[BigUint] {
+        &self.q_hats
+    }
+
+    pub fn q_hat_invs(&self) -> &[BigUint] {
+        &self.q_hat_invs
+    }
+
+    pub fn m(&self) -> usize {
+        1 << (self.log_n + 1)
+    }
+
+    pub fn n(&self) -> usize {
+        1 << self.log_n
+    }
+
+    pub fn l(&self) -> usize {
+        1 << (self.log_n - 1)
+    }
+
+    pub fn psi(&self) -> &[Complex] {
+        &self.psi
+    }
+
+    pub fn pow5(&self) -> &[usize] {
+        &self.pow5
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -32,23 +76,83 @@ pub struct CkksCleartext(Vec<Complex>);
 pub struct CkksPlaintext(Matrix<u64>);
 
 impl Ckks {
-    pub fn param_gen(n: usize) -> CkksParam {
-        CkksParam { n }
+    pub fn param_gen(qs: Vec<u64>, log_n: usize, log_scale: usize) -> CkksParam {
+        assert!(log_n >= 1);
+        let n = 1 << log_n;
+
+        let q = qs.iter().product::<BigUint>();
+        let q_hats = qs.iter().map(|qi| &q / qi).collect_vec();
+        let q_hat_invs = izip!(&qs, &q_hats)
+            .map(|(qi, qi_hat)| qi_hat.modinv(&BigUint::from(*qi)).unwrap())
+            .collect_vec();
+
+        let psi = {
+            let phase = BigFloat::from(2) * BigFloat::pi() / BigFloat::from(2 * n);
+            let cis = Complex::new(phase.cos(), phase.sin());
+            powers(&cis).take(2 * n).collect()
+        };
+
+        let pow5 = iter::successors(Some(1), |pow| ((pow * 5) % (2 * n)).into())
+            .take(2 * n)
+            .collect();
+
+        CkksParam {
+            q,
+            qs,
+            q_hats,
+            q_hat_invs,
+            log_n,
+            log_scale,
+            psi,
+            pow5,
+        }
     }
 
-    pub fn encode(_param: &CkksParam, _m: CkksCleartext, _enc: CkksEncoding) -> CkksPlaintext {
-        todo!()
+    pub fn encode(param: &CkksParam, m: CkksCleartext) -> CkksPlaintext {
+        assert_eq!(m.0.len(), param.l());
+
+        let z = special_ifft(param, m.0);
+
+        let z_scaled = chain![z.iter().map(|z| &z.re), z.iter().map(|z| &z.im)]
+            .map(|z| BigInt::from(z << param.log_scale))
+            .collect_vec();
+
+        let mut pt = Matrix::new(param.qs().len(), param.n());
+        izip!(pt.cols_mut(), param.qs()).for_each(|(col, qi)| {
+            izip!(col, &z_scaled)
+                .for_each(|(cell, z)| *cell = (rem_euclid(z, qi)).to_u64().unwrap());
+        });
+
+        CkksPlaintext(pt)
     }
 
-    pub fn decode(_param: &CkksParam, _pt: CkksPlaintext, _enc: CkksEncoding) -> CkksCleartext {
-        todo!()
+    pub fn decode(param: &CkksParam, pt: CkksPlaintext) -> CkksCleartext {
+        assert_eq!(pt.0.height(), param.n());
+
+        let z_scaled =
+            pt.0.rows()
+                .map(|row| {
+                    let z = izip!(param.q_hats(), param.q_hat_invs(), row)
+                        .map(|(qi_hat, qi_hat_inv, cell)| qi_hat * qi_hat_inv * cell)
+                        .sum::<BigUint>();
+                    rem_center(&z, param.q())
+                })
+                .collect_vec();
+
+        let z = izip!(&z_scaled[..param.l()], &z_scaled[param.l()..])
+            .map(|(re, im)| {
+                let [re, im] = [re, im].map(|z| BigFloat::from(z) >> param.log_scale);
+                Complex::new(re, im)
+            })
+            .collect_vec();
+
+        CkksCleartext(special_fft(param, z))
     }
 }
 
-pub fn special_fft(mut w: Vec<Complex>, psis: &[Complex], pow5s: &[usize]) -> Vec<Complex> {
-    assert!(w.len().is_power_of_two());
-    assert_eq!(w.len() * 4, psis.len());
-    assert_eq!(pow5s.len(), psis.len());
+fn special_fft(param: &CkksParam, mut w: Vec<Complex>) -> Vec<Complex> {
+    assert_eq!(w.len(), param.l());
+    let (pow5, psi) = (param.pow5(), param.psi());
 
     bit_reverse(&mut w);
 
@@ -57,9 +161,9 @@ pub fn special_fft(mut w: Vec<Complex>, psis: &[Complex], pow5s: &[usize]) -> Ve
     while m <= l {
         for i in (0..l).step_by(m) {
             for j in 0..m / 2 {
-                let k = (pow5s[j] % (4 * m)) * l / m;
+                let k = (pow5[j] % (4 * m)) * l / m;
                 let u = w[i + j].clone();
-                let v = &w[i + j + m / 2] * &psis[k];
+                let v = &w[i + j + m / 2] * &psi[k];
                 w[i + j] = &u + &v;
                 w[i + j + m / 2] = &u - &v;
             }
@@ -70,19 +174,18 @@ pub fn special_fft(mut w: Vec<Complex>, psis: &[Complex], pow5s: &[usize]) -> Ve
     w
 }
 
-pub fn special_ifft(mut w: Vec<Complex>, psis: &[Complex], pow5s: &[usize]) -> Vec<Complex> {
-    assert!(w.len().is_power_of_two());
-    assert_eq!(w.len() * 4, psis.len());
-    assert_eq!(pow5s.len(), psis.len());
+fn special_ifft(param: &CkksParam, mut w: Vec<Complex>) -> Vec<Complex> {
+    assert_eq!(w.len(), param.l());
+    let (pow5, psi) = (param.pow5(), param.psi());
 
     let l = w.len();
     let mut m = l;
     while m >= 2 {
         for i in (0..l).step_by(m) {
             for j in 0..m / 2 {
-                let k = (4 * m - pow5s[j] % (4 * m)) * l / m;
+                let k = (4 * m - pow5[j] % (4 * m)) * l / m;
                 let u = &w[i + j] + &w[i + j + m / 2];
-                let v = (&w[i + j] - &w[i + j + m / 2]) * &psis[k];
+                let v = (&w[i + j] - &w[i + j + m / 2]) * &psi[k];
                 w[i + j] = u;
                 w[i + j + m / 2] = v;
             }
@@ -96,40 +199,13 @@ pub fn special_ifft(mut w: Vec<Complex>, psis: &[Complex], pow5s: &[usize]) -> V
     w
 }
 
-pub fn psis(m: usize) -> Vec<Complex> {
-    assert!(m >= 4 && m.is_power_of_two());
-
-    let phase = BigFloat::from(2) * BigFloat::pi() / BigFloat::from(m);
-    let cis = Complex::new(phase.cos(), phase.sin());
-    powers(&cis).take(m).collect()
-}
-
-pub fn pow5s(m: usize) -> Vec<usize> {
-    assert!(m >= 4 && m.is_power_of_two());
-
-    iter::successors(Some(1), |pow| ((pow * 5) % m).into())
-        .take(m)
-        .collect()
-}
-
-pub fn bit_reverse<T>(values: &mut [T]) {
-    if values.len() < 2 {
-        return;
-    }
-
-    assert!(values.len().is_power_of_two());
-    let log_len = values.len().ilog2();
-    for i in 0..values.len() {
-        let j = i.reverse_bits() >> (usize::BITS - log_len);
-        if i < j {
-            values.swap(i, j)
-        }
-    }
-}
-
 #[cfg(test)]
 mod test {
-    use crate::{assert_eq_complex, pow5s, psis, special_fft, special_ifft, util::horner};
+    use crate::{
+        assert_eq_complex, special_fft, special_ifft,
+        util::{horner, primes},
+        Ckks, CkksCleartext,
+    };
     use itertools::{izip, Itertools};
     use rand::{
         rngs::{OsRng, StdRng},
@@ -138,17 +214,29 @@ mod test {
     use rand_distr::Standard;
 
     #[test]
-    fn special_ifft_fft() {
+    fn encrypt_decrypt() {
         let rng = &mut StdRng::seed_from_u64(OsRng.next_u64());
-        for l in (0..10).map(|log_l| 1 << log_l) {
-            let psis = psis(4 * l);
-            let pow5s = pow5s(4 * l);
-            let evals = rng.sample_iter(Standard).take(l).collect_vec();
-            let coeffs = special_ifft(evals.clone(), &psis, &pow5s);
-            izip!(&pow5s, &evals)
-                .for_each(|(k, eval)| assert_eq_complex!(horner(&coeffs, &psis[*k]), eval));
-            izip!(evals, special_fft(coeffs, &psis, &pow5s))
-                .for_each(|(a, b)| assert_eq_complex!(a, b));
+        let qs = primes((0..1 << 50).rev()).take(4).collect_vec();
+        let log_scale = 40;
+        for log_n in 1..10 {
+            let param = Ckks::param_gen(qs.clone(), log_n, log_scale);
+            let m = CkksCleartext(rng.sample_iter(Standard).take(param.l()).collect_vec());
+            izip!(m.clone().0, Ckks::decode(&param, Ckks::encode(&param, m)).0)
+                .for_each(|(lhs, rhs)| assert_eq_complex!(lhs, rhs, 1.0e-10));
+        }
+    }
+
+    #[test]
+    fn special_ifft_fft() {
+        crate::util::rem_euclid(&10, &10);
+        let rng = &mut StdRng::seed_from_u64(OsRng.next_u64());
+        for log_n in 1..10 {
+            let param = Ckks::param_gen(Vec::new(), log_n, 40);
+            let evals = rng.sample_iter(Standard).take(param.l()).collect_vec();
+            let coeffs = special_ifft(&param, evals.clone());
+            izip!(param.pow5(), &evals)
+                .for_each(|(k, eval)| assert_eq_complex!(horner(&coeffs, &param.psi()[*k]), eval));
+            izip!(evals, special_fft(&param, coeffs)).for_each(|(a, b)| assert_eq_complex!(a, b));
         }
     }
 }

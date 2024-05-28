@@ -1,12 +1,13 @@
-use astro_float::{self, Consts, Radix, RoundingMode};
+use astro_float::{self, Consts, Radix, RoundingMode, WORD_BIT_SIZE};
+use num_bigint::BigInt;
 use num_traits::{Num, One, Zero};
 use rand::Rng;
 use rand_distr::{Distribution, Standard, Uniform};
 use std::{
     fmt::{self, Display, Formatter},
     ops::{
-        Add, AddAssign, Deref, DerefMut, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Sub,
-        SubAssign,
+        Add, AddAssign, Deref, DerefMut, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Shl,
+        ShlAssign, Shr, ShrAssign, Sub, SubAssign,
     },
 };
 
@@ -202,6 +203,104 @@ impl Num for BigFloat {
     }
 }
 
+impl ShlAssign<usize> for BigFloat {
+    #[allow(clippy::suspicious_op_assign_impl)]
+    fn shl_assign(&mut self, rhs: usize) {
+        let exp = self.exponent().unwrap() + rhs as i32;
+        self.set_exponent(exp);
+    }
+}
+
+impl Shl<usize> for BigFloat {
+    type Output = BigFloat;
+
+    fn shl(mut self, rhs: usize) -> BigFloat {
+        self <<= rhs;
+        self
+    }
+}
+
+impl Shl<usize> for &BigFloat {
+    type Output = BigFloat;
+
+    fn shl(self, rhs: usize) -> BigFloat {
+        let mut value = self.clone();
+        value <<= rhs;
+        value
+    }
+}
+
+impl ShrAssign<usize> for BigFloat {
+    #[allow(clippy::suspicious_op_assign_impl)]
+    fn shr_assign(&mut self, rhs: usize) {
+        let exp = self.exponent().unwrap() - rhs as i32;
+        self.set_exponent(exp);
+    }
+}
+
+impl Shr<usize> for BigFloat {
+    type Output = BigFloat;
+
+    fn shr(mut self, rhs: usize) -> BigFloat {
+        self >>= rhs;
+        self
+    }
+}
+
+impl Shr<usize> for &BigFloat {
+    type Output = BigFloat;
+
+    fn shr(self, rhs: usize) -> BigFloat {
+        let mut value = self.clone();
+        value >>= rhs;
+        value
+    }
+}
+
+impl From<BigFloat> for BigInt {
+    fn from(value: BigFloat) -> BigInt {
+        let (m, n, s, e, _) = value.as_raw_parts().unwrap();
+
+        if n == 0 {
+            return BigInt::ZERO;
+        }
+
+        let (m_last, m) = m.split_last().unwrap();
+        let mut v = m
+            .iter()
+            .rev()
+            .take(n / WORD_BIT_SIZE)
+            .fold(BigInt::from(*m_last), |v, word| (v << WORD_BIT_SIZE) + word);
+        v >>= (PRECISION as i32) - e;
+
+        if s.is_negative() {
+            -v
+        } else {
+            v
+        }
+    }
+}
+
+impl From<&BigInt> for BigFloat {
+    fn from(value: &BigInt) -> Self {
+        let (sign, digits) = value.to_radix_be(10);
+        let sign = if sign == num_bigint::Sign::Minus {
+            astro_float::Sign::Neg
+        } else {
+            astro_float::Sign::Pos
+        };
+        BigFloat(astro_float::BigFloat::convert_from_radix(
+            sign,
+            &digits,
+            digits.len() as i32,
+            astro_float::Radix::Dec,
+            PRECISION,
+            RM,
+            &mut Consts::new().unwrap(),
+        ))
+    }
+}
+
 impl Distribution<BigFloat> for Uniform<f32> {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> BigFloat {
         rng.sample::<f32, _>(self).into()
@@ -222,12 +321,12 @@ impl Distribution<BigFloat> for Standard {
 
 #[macro_export]
 macro_rules! assert_eq_float {
-    (@ $lhs:expr, $rhs:expr $(,$field:literal)?) => {{
+    (@ $error:literal, $lhs:expr, $rhs:expr $(,$field:literal)?) => {{
         let (lhs, rhs) = ($lhs, $rhs);
         let diff = lhs - rhs;
         let diff = if diff.is_negative() { -diff } else { diff };
         assert!(
-            diff < $crate::float::BigFloat::from(1.0e-70),
+            diff < $crate::float::BigFloat::from($error),
             concat!(
                 "assertion `left",
                 $(".", $field,)?
@@ -239,16 +338,22 @@ macro_rules! assert_eq_float {
             rhs,
         );
     }};
+    ($lhs:expr, $rhs:expr, $error:literal $(,)?) => {
+        $crate::assert_eq_float!(@ $error, $lhs, $rhs);
+    };
     ($lhs:expr, $rhs:expr $(,)?) => {
-        $crate::assert_eq_float!(@ $lhs, $rhs);
+        $crate::assert_eq_float!($lhs, $rhs, 1.0e-70);
     };
 }
 
 #[macro_export]
 macro_rules! assert_eq_complex {
-    ($lhs:expr, $rhs:expr $(,)?) => {{
+    ($lhs:expr, $rhs:expr, $error:literal $(,)?) => {{
         let (lhs, rhs) = (&$lhs, &$rhs);
-        $crate::assert_eq_float!(@ &lhs.re, &rhs.re, "re");
-        $crate::assert_eq_float!(@ &lhs.im, &rhs.im, "im");
+        $crate::assert_eq_float!(@ $error, &lhs.re, &rhs.re, "re");
+        $crate::assert_eq_float!(@ $error, &lhs.im, &rhs.im, "im");
+    }};
+    ($lhs:expr, $rhs:expr $(,)?) => {{
+        $crate::assert_eq_complex!($lhs, $rhs, 1.0e-70);
     }};
 }

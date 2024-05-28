@@ -6,7 +6,7 @@ resolver = "2"
 astro-float = "0.9.4"
 itertools = "0.12.0"
 num-bigint = "0.4.3"
-num-bigint-dig = "0.8.4"
+num-bigint-dig = { version = "0.8.4", features = ["prime"] }
 num-complex = "0.4.6"
 num-integer = "0.1.45"
 num-traits = "0.2.16"
