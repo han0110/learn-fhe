@@ -1,19 +1,17 @@
-#![allow(dead_code)]
-
 use crate::{
     float::{BigFloat, Complex},
-    mat::Matrix,
     util::{bit_reverse, powers},
 };
 use itertools::{chain, izip, Itertools};
-use num_bigint::{BigInt, BigUint};
-use num_traits::ToPrimitive;
-use util::{rem_center, rem_euclid};
-
-use std::iter;
+use num_bigint::BigInt;
+use poly::CrtPoly;
+use rand::RngCore;
+use rand_distr::Distribution;
+use std::{iter, rc::Rc};
+use util::{zo, DiscreteNormal, SmallPrime};
 
 pub mod float;
-pub mod mat;
+pub mod poly;
 pub mod util;
 
 #[derive(Clone, Debug)]
@@ -21,33 +19,15 @@ pub struct Ckks;
 
 #[derive(Clone, Debug)]
 pub struct CkksParam {
-    q: BigUint,
-    qs: Vec<u64>,
-    q_hats: Vec<BigUint>,
-    q_hat_invs: Vec<BigUint>,
     log_n: usize,
     log_scale: usize,
-    psi: Vec<Complex>,
+    qs: Vec<Rc<SmallPrime>>,
     pow5: Vec<usize>,
+    psi: Vec<Complex>,
+    chi: DiscreteNormal,
 }
 
 impl CkksParam {
-    pub fn q(&self) -> &BigUint {
-        &self.q
-    }
-
-    pub fn qs(&self) -> &[u64] {
-        &self.qs
-    }
-
-    pub fn q_hats(&self) -> &[BigUint] {
-        &self.q_hats
-    }
-
-    pub fn q_hat_invs(&self) -> &[BigUint] {
-        &self.q_hat_invs
-    }
-
     pub fn m(&self) -> usize {
         1 << (self.log_n + 1)
     }
@@ -67,24 +47,33 @@ impl CkksParam {
     pub fn pow5(&self) -> &[usize] {
         &self.pow5
     }
+
+    pub fn qs(&self) -> &[Rc<SmallPrime>] {
+        &self.qs
+    }
+
+    pub fn chi(&self) -> &impl Distribution<i8> {
+        &self.chi
+    }
 }
+
+#[derive(Clone, Debug)]
+pub struct CkksSecretKey(CrtPoly);
+
+#[derive(Clone, Debug)]
+pub struct CkksPublicKey(CrtPoly, CrtPoly);
 
 #[derive(Clone, Debug)]
 pub struct CkksCleartext(Vec<Complex>);
 
 #[derive(Clone, Debug)]
-pub struct CkksPlaintext(Matrix<u64>);
+pub struct CkksPlaintext(CrtPoly);
+pub struct CkksCiphertext(CrtPoly, CrtPoly);
 
 impl Ckks {
-    pub fn param_gen(qs: Vec<u64>, log_n: usize, log_scale: usize) -> CkksParam {
+    pub fn param_gen(log_n: usize, log_scale: usize, qs: Vec<u64>) -> CkksParam {
         assert!(log_n >= 1);
         let n = 1 << log_n;
-
-        let q = qs.iter().product::<BigUint>();
-        let q_hats = qs.iter().map(|qi| &q / qi).collect_vec();
-        let q_hat_invs = izip!(&qs, &q_hats)
-            .map(|(qi, qi_hat)| qi_hat.modinv(&BigUint::from(*qi)).unwrap())
-            .collect_vec();
 
         let psi = {
             let phase = BigFloat::from(2) * BigFloat::pi() / BigFloat::from(2 * n);
@@ -96,16 +85,32 @@ impl Ckks {
             .take(2 * n)
             .collect();
 
+        let qs = qs
+            .into_iter()
+            .map(|q| SmallPrime::new(q).into())
+            .collect_vec();
+
+        let chi = DiscreteNormal::new(3.2, 6).unwrap();
+
         CkksParam {
-            q,
-            qs,
-            q_hats,
-            q_hat_invs,
             log_n,
             log_scale,
+            qs,
             psi,
             pow5,
+            chi,
         }
+    }
+
+    pub fn key_gen(param: &CkksParam, rng: &mut impl RngCore) -> (CkksSecretKey, CkksPublicKey) {
+        let sk = CrtPoly::sample_small(param.n(), param.qs(), &zo(0.5), rng);
+        let pk = {
+            let a = CrtPoly::sample_uniform(param.n(), param.qs(), rng);
+            let e = CrtPoly::sample_small(param.n(), param.qs(), param.chi(), rng);
+            let b = -(&a * &sk) + e;
+            (b, a)
+        };
+        (CkksSecretKey(sk), CkksPublicKey(pk.0, pk.1))
     }
 
     pub fn encode(param: &CkksParam, m: CkksCleartext) -> CkksPlaintext {
@@ -117,11 +122,7 @@ impl Ckks {
             .map(|z| BigInt::from(z << param.log_scale))
             .collect_vec();
 
-        let mut pt = Matrix::new(param.qs().len(), param.n());
-        izip!(pt.cols_mut(), param.qs()).for_each(|(col, qi)| {
-            izip!(col, &z_scaled)
-                .for_each(|(cell, z)| *cell = (rem_euclid(z, qi)).to_u64().unwrap());
-        });
+        let pt = CrtPoly::from_bigint(z_scaled, param.qs());
 
         CkksPlaintext(pt)
     }
@@ -129,15 +130,7 @@ impl Ckks {
     pub fn decode(param: &CkksParam, pt: CkksPlaintext) -> CkksCleartext {
         assert_eq!(pt.0.height(), param.n());
 
-        let z_scaled =
-            pt.0.rows()
-                .map(|row| {
-                    let z = izip!(param.q_hats(), param.q_hat_invs(), row)
-                        .map(|(qi_hat, qi_hat_inv, cell)| qi_hat * qi_hat_inv * cell)
-                        .sum::<BigUint>();
-                    rem_center(&z, param.q())
-                })
-                .collect_vec();
+        let z_scaled = pt.0.into_bigint();
 
         let z = izip!(&z_scaled[..param.l()], &z_scaled[param.l()..])
             .map(|(re, im)| {
@@ -146,7 +139,28 @@ impl Ckks {
             })
             .collect_vec();
 
-        CkksCleartext(special_fft(param, z))
+        let m = special_fft(param, z);
+
+        CkksCleartext(m)
+    }
+
+    pub fn encrypt(
+        param: &CkksParam,
+        pk: &CkksPublicKey,
+        pt: CkksPlaintext,
+        rng: &mut impl RngCore,
+    ) -> CkksCiphertext {
+        let u = &CrtPoly::sample_small(param.n(), param.qs(), &zo(0.5), rng);
+        let e0 = &CrtPoly::sample_small(param.n(), param.qs(), param.chi(), &mut *rng);
+        let e1 = &CrtPoly::sample_small(param.n(), param.qs(), param.chi(), &mut *rng);
+        let c0 = &pk.0 * u + e0 + pt.0;
+        let c1 = &pk.1 * u + e1;
+        CkksCiphertext(c0, c1)
+    }
+
+    pub fn decrypt(_: &CkksParam, sk: &CkksSecretKey, ct: CkksCiphertext) -> CkksPlaintext {
+        let pt = ct.0 + ct.1 * &sk.0;
+        CkksPlaintext(pt)
     }
 }
 
@@ -203,7 +217,7 @@ fn special_ifft(param: &CkksParam, mut w: Vec<Complex>) -> Vec<Complex> {
 mod test {
     use crate::{
         assert_eq_complex, special_fft, special_ifft,
-        util::{horner, primes},
+        util::{horner, two_adic_primes},
         Ckks, CkksCleartext,
     };
     use itertools::{izip, Itertools};
@@ -216,22 +230,26 @@ mod test {
     #[test]
     fn encrypt_decrypt() {
         let rng = &mut StdRng::seed_from_u64(OsRng.next_u64());
-        let qs = primes((0..1 << 50).rev()).take(4).collect_vec();
-        let log_scale = 40;
+        let (log_scale, qi_bits, num_qs) = (80, 50, 8);
         for log_n in 1..10 {
-            let param = Ckks::param_gen(qs.clone(), log_n, log_scale);
+            let qs = two_adic_primes(qi_bits, log_n + 1).take(num_qs).collect();
+            let param = Ckks::param_gen(log_n, log_scale, qs);
+            let (sk, pk) = Ckks::key_gen(&param, rng);
+
             let m = CkksCleartext(rng.sample_iter(Standard).take(param.l()).collect_vec());
-            izip!(m.clone().0, Ckks::decode(&param, Ckks::encode(&param, m)).0)
-                .for_each(|(lhs, rhs)| assert_eq_complex!(lhs, rhs, 1.0e-10));
+            let pt = Ckks::encode(&param, m.clone());
+            let ct = Ckks::encrypt(&param, &pk, pt, rng);
+
+            izip!(m.0, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct)).0)
+                .for_each(|(lhs, rhs)| assert_eq_complex!(lhs, rhs, 1.0e-20));
         }
     }
 
     #[test]
     fn special_ifft_fft() {
-        crate::util::rem_euclid(&10, &10);
         let rng = &mut StdRng::seed_from_u64(OsRng.next_u64());
         for log_n in 1..10 {
-            let param = Ckks::param_gen(Vec::new(), log_n, 40);
+            let param = Ckks::param_gen(log_n, 0, Vec::new());
             let evals = rng.sample_iter(Standard).take(param.l()).collect_vec();
             let coeffs = special_ifft(&param, evals.clone());
             izip!(param.pow5(), &evals)
