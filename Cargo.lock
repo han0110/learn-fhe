@@ -318,6 +318,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tfhe"
+version = "0.1.0"
+dependencies = [
+ "itertools 0.12.1",
+ "num-traits",
+ "rand",
+ "rand_distr",
+]
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"

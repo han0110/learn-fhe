@@ -1,0 +1,10 @@
+[package]
+name = "tfhe"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+num-traits = { workspace = true }
+itertools = { workspace = true }
+rand = { workspace = true }
+rand_distr = { workspace = true }
