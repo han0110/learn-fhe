@@ -1,15 +1,15 @@
 use astro_float::{self, Consts, Radix, RoundingMode, WORD_BIT_SIZE};
-use num_bigint::BigInt;
-use num_traits::{Num, One, Zero};
-use rand::Rng;
-use rand_distr::{Distribution, Standard, Uniform};
-use std::{
+use core::{
     fmt::{self, Display, Formatter},
     ops::{
         Add, AddAssign, Deref, DerefMut, Div, DivAssign, Mul, MulAssign, Neg, Rem, RemAssign, Shl,
         ShlAssign, Shr, ShrAssign, Sub, SubAssign,
     },
 };
+use num_bigint::BigInt;
+use num_traits::{Num, One, Zero};
+use rand::Rng;
+use rand_distr::{Distribution, Standard, Uniform};
 
 pub type Complex<T = BigFloat> = num_complex::Complex<T>;
 
@@ -326,7 +326,7 @@ macro_rules! assert_eq_float {
         let diff = lhs - rhs;
         let diff = if diff.is_negative() { -diff } else { diff };
         assert!(
-            diff < $crate::float::BigFloat::from($error),
+            diff < $crate::util::float::BigFloat::from($error),
             concat!(
                 "assertion `left",
                 $(".", $field,)?

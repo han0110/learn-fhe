@@ -1,12 +1,13 @@
-use crate::util::{rem_center, SmallPrime};
+use crate::util::{prime::SmallPrime, rem_center};
+use core::{
+    convert::identity,
+    ops::{Add, AddAssign, Deref, DerefMut, Mul, MulAssign, Neg, Sub, SubAssign},
+};
 use itertools::{izip, Itertools};
 use num_bigint::{BigInt, BigUint};
 use rand::RngCore;
-use rand_distr::{Distribution, Uniform};
-use std::{
-    ops::{Add, AddAssign, Deref, DerefMut, Mul, MulAssign, Neg},
-    rc::Rc,
-};
+use rand_distr::Distribution;
+use std::rc::Rc;
 
 #[derive(Clone, Debug)]
 pub struct Matrix<T> {
@@ -76,10 +77,8 @@ impl CrtPoly {
 
     pub fn sample_uniform(n: usize, qs: &[Rc<SmallPrime>], rng: &mut impl RngCore) -> Self {
         let mut poly = Self::new(n, qs);
-        izip!(poly.cols_mut(), qs).for_each(|(col, qi)| {
-            let uniform = Uniform::new(0, ***qi);
-            col.iter_mut().for_each(|cell| *cell = uniform.sample(rng))
-        });
+        izip!(poly.cols_mut(), qs)
+            .for_each(|(col, qi)| col.iter_mut().for_each(|cell| *cell = qi.sample(rng)));
         poly
     }
 
@@ -148,6 +147,16 @@ impl AddAssign<&CrtPoly> for CrtPoly {
     }
 }
 
+impl SubAssign<&CrtPoly> for CrtPoly {
+    fn sub_assign(&mut self, rhs: &CrtPoly) {
+        assert_eq!(self.qs, rhs.qs);
+
+        izip!(self.cols_mut(), rhs.cols(), &rhs.qs).for_each(|(lhs, rhs, qi)| {
+            izip!(lhs, rhs.iter()).for_each(|(lhs, rhs)| *lhs = qi.sub(*lhs, *rhs))
+        });
+    }
+}
+
 impl MulAssign<&CrtPoly> for CrtPoly {
     fn mul_assign(&mut self, rhs: &CrtPoly) {
         assert_eq!(self.qs, rhs.qs);
@@ -159,52 +168,31 @@ impl MulAssign<&CrtPoly> for CrtPoly {
 }
 
 macro_rules! impl_arithmetic_ops {
-    ($(impl $trait:ident<$rhs:ty> for $lhs:ty),* $(,)?) => {
-        $(
-            paste::paste! {
-                impl $trait<$rhs> for $lhs {
-                    type Output = $lhs;
+    (@ impl $trait:ident<$rhs:ty> for $lhs:ty; $convert:expr) => {
+        paste::paste! {
+            impl $trait<$rhs> for $lhs {
+                type Output = CrtPoly;
 
-                    fn [<$trait:lower>](mut self, other: $rhs) -> $lhs {
-                        self.[<$trait:lower _assign>](&other);
-                        self
-                    }
-                }
-
-                impl $trait<&$rhs> for $lhs {
-                    type Output = $lhs;
-
-                    fn [<$trait:lower>](mut self, other: &$rhs) -> $lhs {
-                        self.[<$trait:lower _assign>](other);
-                        self
-                    }
-                }
-
-                impl $trait<$rhs> for &$lhs {
-                    type Output = $lhs;
-
-                    fn [<$trait:lower>](self, other: $rhs) -> $lhs {
-                        let mut lhs = self.clone();
-                        lhs.[<$trait:lower _assign>](&other);
-                        lhs
-                    }
-                }
-
-                impl $trait<&$rhs> for &$lhs {
-                    type Output = $lhs;
-
-                    fn [<$trait:lower>](self, other: &$rhs) -> $lhs {
-                        let mut lhs = self.clone();
-                        lhs.[<$trait:lower _assign>](other);
-                        lhs
-                    }
+                fn [<$trait:lower>](self, other: $rhs) -> CrtPoly {
+                    let mut value = $convert(self);
+                    value.[<$trait:lower _assign>](&other);
+                    value
                 }
             }
+        }
+    };
+    ($(impl $trait:ident<$rhs:ty> for $lhs:ty),* $(,)?) => {
+        $(
+            impl_arithmetic_ops!(@ impl $trait<$rhs> for $lhs; identity);
+            impl_arithmetic_ops!(@ impl $trait<&$rhs> for $lhs; identity);
+            impl_arithmetic_ops!(@ impl $trait<$rhs> for &$lhs; <_>::clone);
+            impl_arithmetic_ops!(@ impl $trait<&$rhs> for &$lhs; <_>::clone);
         )*
     };
 }
 
 impl_arithmetic_ops!(
     impl Add<CrtPoly> for CrtPoly,
+    impl Sub<CrtPoly> for CrtPoly,
     impl Mul<CrtPoly> for CrtPoly,
 );
