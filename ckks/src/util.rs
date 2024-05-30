@@ -7,8 +7,7 @@ use itertools::izip;
 use num_bigint::{BigInt, BigUint, Sign, ToBigInt};
 use num_integer::Integer;
 use num_traits::One;
-use rand::Rng;
-use rand_distr::{Distribution, Standard, WeightedError, WeightedIndex};
+use rand_distr::{Distribution, Standard, WeightedIndex};
 
 pub mod float;
 pub mod poly;
@@ -69,41 +68,28 @@ pub fn zo(rho: f64) -> impl Distribution<i8> {
     })
 }
 
-#[derive(Clone, Debug)]
-pub struct DiscreteNormal {
-    sampler: WeightedIndex<f64>,
-    max: i8,
-}
-
-impl DiscreteNormal {
-    pub fn new(std_dev: f64, n: u64) -> Result<Self, WeightedError> {
-        let max = (n as f64 * std_dev).floor() as i8;
-        // Formula 7.1.26 from Handbook of Mathematical Functions.
-        let erf = |x: f64| {
-            let p = 0.3275911;
-            let a1 = 0.254829592;
-            let a2 = -0.284496736;
-            let a3 = 1.421413741;
-            let a4 = -1.453152027;
-            let a5 = 1.061405429;
-            let t = 1.0 / (1.0 + p * x.abs());
-            let positive_erf =
-                1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * (-x * x).exp();
-            if x.is_sign_positive() {
-                positive_erf
-            } else {
-                -positive_erf
-            }
-        };
-        let cdf = |x| (1. + erf(x / (std_dev * SQRT_2))) / 2.;
-        let sampler =
-            WeightedIndex::new((-max..=max).map(|i| cdf(i as f64 + 0.5) - cdf(i as f64 - 0.5)))?;
-        Ok(Self { sampler, max })
-    }
-}
-
-impl Distribution<i8> for DiscreteNormal {
-    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> i8 {
-        self.sampler.sample(rng) as i8 - self.max
-    }
+pub fn chi(std_dev: f64, n: u64) -> impl Distribution<i8> {
+    // Formula 7.1.26 from Handbook of Mathematical Functions.
+    let erf = |x: f64| {
+        let p = 0.3275911;
+        let a1 = 0.254829592;
+        let a2 = -0.284496736;
+        let a3 = 1.421413741;
+        let a4 = -1.453152027;
+        let a5 = 1.061405429;
+        let t = 1.0 / (1.0 + p * x.abs());
+        let positive_erf =
+            1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * (-x * x).exp();
+        if x.is_sign_positive() {
+            positive_erf
+        } else {
+            -positive_erf
+        }
+    };
+    let cdf = |x| (1.0 + erf(x / (std_dev * SQRT_2))) / 2.0;
+    let max = (n as f64 * std_dev).floor() as i8;
+    let weights = (-max..=max).map(|i| cdf(i as f64 + 0.5) - cdf(i as f64 - 0.5));
+    WeightedIndex::new(weights)
+        .unwrap()
+        .map(move |v| v as i8 - max)
 }

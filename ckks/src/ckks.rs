@@ -1,16 +1,15 @@
 use crate::util::{
-    bit_reverse,
+    bit_reverse, chi,
     float::{BigFloat, Complex},
     poly::CrtPoly,
     powers,
     prime::SmallPrime,
-    zo, DiscreteNormal,
+    zo,
 };
 use core::iter::successors;
 use itertools::{chain, izip, Itertools};
 use num_bigint::BigInt;
 use rand::RngCore;
-use rand_distr::Distribution;
 use std::rc::Rc;
 
 #[derive(Clone, Debug)]
@@ -23,7 +22,6 @@ pub struct CkksParam {
     qs: Vec<Rc<SmallPrime>>,
     pow5: Vec<usize>,
     psi: Vec<Complex>,
-    chi: DiscreteNormal,
 }
 
 impl CkksParam {
@@ -49,10 +47,6 @@ impl CkksParam {
 
     pub fn qs(&self) -> &[Rc<SmallPrime>] {
         &self.qs
-    }
-
-    pub fn chi(&self) -> &impl Distribution<i8> {
-        &self.chi
     }
 }
 
@@ -89,12 +83,7 @@ impl Ckks {
             .take(2 * n)
             .collect();
 
-        let qs = qs
-            .into_iter()
-            .map(|q| SmallPrime::new(q).into())
-            .collect_vec();
-
-        let chi = DiscreteNormal::new(3.2, 6).unwrap();
+        let qs = qs.into_iter().map(|q| SmallPrime::new(q).into()).collect();
 
         CkksParam {
             log_n,
@@ -102,7 +91,6 @@ impl Ckks {
             qs,
             psi,
             pow5,
-            chi,
         }
     }
 
@@ -113,7 +101,7 @@ impl Ckks {
         let sk = CrtPoly::sample_small(param.n(), param.qs(), &zo(0.5), rng);
         let pk = {
             let a = CrtPoly::sample_uniform(param.n(), param.qs(), rng);
-            let e = CrtPoly::sample_small(param.n(), param.qs(), param.chi(), rng);
+            let e = CrtPoly::sample_small(param.n(), param.qs(), &chi(3.2, 6), rng);
             let b = -(&a * &sk) + e;
             (b, a)
         };
@@ -162,8 +150,8 @@ impl Ckks {
         rng: &mut impl RngCore,
     ) -> CkksCiphertext {
         let u = &CrtPoly::sample_small(param.n(), param.qs(), &zo(0.5), rng);
-        let e0 = &CrtPoly::sample_small(param.n(), param.qs(), param.chi(), &mut *rng);
-        let e1 = &CrtPoly::sample_small(param.n(), param.qs(), param.chi(), &mut *rng);
+        let e0 = &CrtPoly::sample_small(param.n(), param.qs(), &chi(3.2, 6), &mut *rng);
+        let e1 = &CrtPoly::sample_small(param.n(), param.qs(), &chi(3.2, 6), &mut *rng);
         let c0 = &pk.0 * u + e0 + pt.0;
         let c1 = &pk.1 * u + e1;
         CkksCiphertext(c0, c1)
