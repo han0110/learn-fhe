@@ -321,12 +321,12 @@ impl Distribution<BigFloat> for Standard {
 
 #[macro_export]
 macro_rules! assert_eq_float {
-    (@ $error:literal, $lhs:expr, $rhs:expr $(,$field:literal)?) => {{
+    (@ $precision:literal, $lhs:expr, $rhs:expr $(,$field:literal)?) => {{
         let (lhs, rhs) = ($lhs, $rhs);
         let diff = lhs - rhs;
         let diff = if diff.is_negative() { -diff } else { diff };
         assert!(
-            diff < $crate::util::float::BigFloat::from($error),
+            diff < (<$crate::util::float::BigFloat as num_traits::One>::one() >> $precision),
             concat!(
                 "assertion `left",
                 $(".", $field,)?
@@ -338,22 +338,22 @@ macro_rules! assert_eq_float {
             rhs,
         );
     }};
-    ($lhs:expr, $rhs:expr, $error:literal $(,)?) => {
-        $crate::assert_eq_float!(@ $error, $lhs, $rhs);
+    ($lhs:expr, $rhs:expr, $precision:literal $(,)?) => {
+        $crate::assert_eq_float!(@ $precision, $lhs, $rhs);
     };
     ($lhs:expr, $rhs:expr $(,)?) => {
-        $crate::assert_eq_float!($lhs, $rhs, 1.0e-70);
+        $crate::assert_eq_float!($lhs, $rhs, 200);
     };
 }
 
 #[macro_export]
 macro_rules! assert_eq_complex {
-    ($lhs:expr, $rhs:expr, $error:literal $(,)?) => {{
+    ($lhs:expr, $rhs:expr, $precision:literal $(,)?) => {{
         let (lhs, rhs) = (&$lhs, &$rhs);
-        $crate::assert_eq_float!(@ $error, &lhs.re, &rhs.re, "re");
-        $crate::assert_eq_float!(@ $error, &lhs.im, &rhs.im, "im");
+        $crate::assert_eq_float!(@ $precision, &lhs.re, &rhs.re, "re");
+        $crate::assert_eq_float!(@ $precision, &lhs.im, &rhs.im, "im");
     }};
     ($lhs:expr, $rhs:expr $(,)?) => {{
-        $crate::assert_eq_complex!($lhs, $rhs, 1.0e-70);
+        $crate::assert_eq_complex!($lhs, $rhs, 200);
     }};
 }

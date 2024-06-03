@@ -20,6 +20,8 @@ struct Matrix<T, S = Vec<T>> {
     _marker: PhantomData<T>,
 }
 
+type MatrixMut<'a, T> = Matrix<T, &'a mut [T]>;
+
 impl<T> Matrix<T> {
     fn empty(height: usize, width: usize) -> Self
     where
@@ -57,6 +59,24 @@ impl<T, S: Borrow<[T]>> Matrix<T, S> {
 
     fn rows(&self) -> impl Iterator<Item = impl Iterator<Item = &T>> {
         (0..self.height).map(|idx| self.data.borrow()[idx..].iter().step_by(self.height))
+    }
+
+    fn split_last_col_mut(&mut self) -> (&mut [T], MatrixMut<T>)
+    where
+        S: BorrowMut<[T]>,
+    {
+        let mid = self.data.borrow().len() - self.height;
+        let (left, right) = self.data.borrow_mut().split_at_mut(mid);
+        (right, Matrix::new(left, self.height))
+    }
+}
+
+impl<T> Matrix<T, Vec<T>> {
+    fn resize_cols(&mut self, n: usize)
+    where
+        T: Default,
+    {
+        self.data.resize_with(self.height * n, T::default);
     }
 }
 
@@ -119,8 +139,30 @@ impl CrtPoly {
         let helper = CrtHelper::new(&self.qs);
         self.mat
             .rows()
-            .map(|row| helper.bases_to_bigint(row))
+            .map(|row| helper.rems_to_bigint(row))
             .collect()
+    }
+
+    pub fn rescale(mut self) -> Self {
+        let (q_k, qs) = self.qs.split_last().unwrap();
+        let (q_k_col, mut mat) = self.mat.split_last_col_mut();
+        let q_k_half = ***q_k / 2;
+
+        q_k.neg_intt_in_place(q_k_col);
+        q_k_col
+            .iter_mut()
+            .for_each(|cell| *cell = q_k.add(*cell, q_k_half));
+
+        izip!(mat.cols_mut(), qs).for_each(|(col, qi)| {
+            let q_k_inv = qi.inv(***q_k);
+            let q_k_col = qi.neg_ntt(q_k_col.iter().map(|cell| qi.sub(*cell, q_k_half)).collect());
+            izip!(col, q_k_col)
+                .for_each(|(cell, q_k_cell)| *cell = qi.mul(q_k_inv, qi.sub(*cell, q_k_cell)));
+        });
+
+        self.mat.resize_cols(qs.len());
+        self.qs.pop();
+        self
     }
 }
 
@@ -136,7 +178,8 @@ impl Neg for CrtPoly {
 
 impl AddAssign<&CrtPoly> for CrtPoly {
     fn add_assign(&mut self, rhs: &CrtPoly) {
-        assert_eq!(self.qs, rhs.qs);
+        let level = self.qs.len().min(rhs.qs.len());
+        assert_eq!(self.qs[..level], rhs.qs[..level]);
 
         izip!(self.mat.cols_mut(), rhs.mat.cols(), &rhs.qs).for_each(|(lhs, rhs, qi)| {
             izip!(lhs, rhs.iter()).for_each(|(lhs, rhs)| *lhs = qi.add(*lhs, *rhs))
@@ -146,7 +189,8 @@ impl AddAssign<&CrtPoly> for CrtPoly {
 
 impl SubAssign<&CrtPoly> for CrtPoly {
     fn sub_assign(&mut self, rhs: &CrtPoly) {
-        assert_eq!(self.qs, rhs.qs);
+        let level = self.qs.len().min(rhs.qs.len());
+        assert_eq!(self.qs[..level], rhs.qs[..level]);
 
         izip!(self.mat.cols_mut(), rhs.mat.cols(), &rhs.qs).for_each(|(lhs, rhs, qi)| {
             izip!(lhs, rhs.iter()).for_each(|(lhs, rhs)| *lhs = qi.sub(*lhs, *rhs))
@@ -156,7 +200,8 @@ impl SubAssign<&CrtPoly> for CrtPoly {
 
 impl MulAssign<&CrtPoly> for CrtPoly {
     fn mul_assign(&mut self, rhs: &CrtPoly) {
-        assert_eq!(self.qs, rhs.qs);
+        let level = self.qs.len().min(rhs.qs.len());
+        assert_eq!(self.qs[..level], rhs.qs[..level]);
 
         izip!(self.mat.cols_mut(), rhs.mat.cols(), &rhs.qs).for_each(|(lhs, rhs, qi)| {
             izip!(lhs, rhs.iter()).for_each(|(lhs, rhs)| *lhs = qi.mul(*lhs, *rhs))
@@ -214,9 +259,9 @@ impl CrtHelper {
         }
     }
 
-    fn bases_to_bigint<'t>(&self, bases: impl Iterator<Item = &'t u64>) -> BigInt {
-        let v = izip!(&self.q_hats, &self.q_hats_inv_qs, bases)
-            .map(|(qi_hat, qi_hat_inv, base)| qi_hat * qi_hat_inv * base)
+    fn rems_to_bigint<'t>(&self, rems: impl Iterator<Item = &'t u64>) -> BigInt {
+        let v = izip!(&self.q_hats, &self.q_hats_inv_qs, rems)
+            .map(|(qi_hat, qi_hat_inv, rem)| qi_hat * qi_hat_inv * rem)
             .sum();
         rem_center(&v, &self.q)
     }
