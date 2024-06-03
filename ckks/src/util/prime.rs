@@ -194,6 +194,26 @@ impl SmallPrime {
         mod_inv(a, self.q)
     }
 
+    pub fn inv_biguint(&self, a: &BigUint) -> u64 {
+        a.modinv(&self.q.into()).unwrap().to_u64().unwrap()
+    }
+
+    pub fn inner_product<'a>(
+        &self,
+        a: impl IntoIterator<Item = &'a u64>,
+        b: impl IntoIterator<Item = &'a u64>,
+    ) -> u64 {
+        a.into_iter()
+            .zip_eq(b)
+            .map(|(ai, bi)| self.mul(*ai, *bi))
+            .reduce(|acc, item| self.add(acc, item))
+            .unwrap_or_default()
+    }
+
+    pub fn from_biguint(&self, a: &BigUint) -> u64 {
+        (a % self.q).to_u64().unwrap()
+    }
+
     pub fn from_bigint(&self, a: &BigInt) -> u64 {
         let a = (a % self.q as i64).to_i64().unwrap();
         let a = if a < 0 { a + self.q as i64 } else { a };

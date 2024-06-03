@@ -4,7 +4,7 @@ use core::{
     ops::Mul,
 };
 use itertools::izip;
-use num_bigint::{BigInt, BigUint, Sign, ToBigInt};
+use num_bigint::{BigInt, BigUint, ToBigInt};
 use num_integer::Integer;
 use num_traits::One;
 use rand_distr::{Distribution, Standard, WeightedIndex};
@@ -18,7 +18,7 @@ pub fn rem_center(value: &BigUint, q: &BigUint) -> BigInt {
     if value < q >> 1usize {
         value.to_bigint().unwrap()
     } else {
-        BigInt::from_biguint(Sign::Minus, q - value)
+        value.to_bigint().unwrap() - q.to_bigint().unwrap()
     }
 }
 
@@ -68,7 +68,7 @@ pub fn zo(rho: f64) -> impl Distribution<i8> {
     })
 }
 
-pub fn chi(std_dev: f64, n: u64) -> impl Distribution<i8> {
+pub fn dg(std_dev: f64, n: u64) -> impl Distribution<i8> {
     // Formula 7.1.26 from Handbook of Mathematical Functions.
     let erf = |x: f64| {
         let p = 0.3275911;

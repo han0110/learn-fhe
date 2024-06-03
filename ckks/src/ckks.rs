@@ -1,5 +1,5 @@
 use crate::util::{
-    bit_reverse, chi,
+    bit_reverse, dg,
     float::{BigFloat, Complex},
     poly::CrtPoly,
     powers,
@@ -71,6 +71,8 @@ pub struct CkksCiphertext(CrtPoly, CrtPoly);
 impl Ckks {
     pub fn param_gen(log_n: usize, log_scale: usize, qs: Vec<u64>) -> CkksParam {
         assert!(log_n >= 1);
+        assert_eq!(qs.iter().unique().count(), qs.len());
+
         let n = 1 << log_n;
 
         let psi = {
@@ -83,7 +85,7 @@ impl Ckks {
             .take(2 * n)
             .collect();
 
-        let qs = qs.into_iter().map(|q| SmallPrime::new(q).into()).collect();
+        let qs = qs.into_iter().map(SmallPrime::new).map_into().collect();
 
         CkksParam {
             log_n,
@@ -98,18 +100,15 @@ impl Ckks {
         param: &CkksParam,
         rng: &mut impl RngCore,
     ) -> (CkksSecretKey, CkksPublicKey, CkksEvaluationKey) {
-        let sk = CrtPoly::sample_small(param.n(), param.qs(), &zo(0.5), rng);
+        let sk = CkksSecretKey(CrtPoly::sample_small(param.n(), param.qs(), &zo(0.5), rng));
         let pk = {
             let a = CrtPoly::sample_uniform(param.n(), param.qs(), rng);
-            let e = CrtPoly::sample_small(param.n(), param.qs(), &chi(3.2, 6), rng);
-            let b = -(&a * &sk) + e;
-            (b, a)
+            let e = CrtPoly::sample_small(param.n(), param.qs(), &dg(3.2, 6), rng);
+            let b = -(&a * &sk.0) + e;
+            CkksPublicKey(b, a)
         };
-        (
-            CkksSecretKey(sk),
-            CkksPublicKey(pk.0, pk.1),
-            CkksEvaluationKey,
-        )
+        let ek = CkksEvaluationKey;
+        (sk, pk, ek)
     }
 
     pub fn encode(param: &CkksParam, m: CkksCleartext) -> CkksPlaintext {
@@ -127,7 +126,7 @@ impl Ckks {
     }
 
     pub fn decode(param: &CkksParam, pt: CkksPlaintext) -> CkksCleartext {
-        assert_eq!(pt.0.height(), param.n());
+        assert_eq!(pt.0.n(), param.n());
 
         let z_scaled = pt.0.into_bigint();
 
@@ -150,8 +149,8 @@ impl Ckks {
         rng: &mut impl RngCore,
     ) -> CkksCiphertext {
         let u = &CrtPoly::sample_small(param.n(), param.qs(), &zo(0.5), rng);
-        let e0 = &CrtPoly::sample_small(param.n(), param.qs(), &chi(3.2, 6), &mut *rng);
-        let e1 = &CrtPoly::sample_small(param.n(), param.qs(), &chi(3.2, 6), &mut *rng);
+        let e0 = &CrtPoly::sample_small(param.n(), param.qs(), &dg(3.2, 6), &mut *rng);
+        let e1 = &CrtPoly::sample_small(param.n(), param.qs(), &dg(3.2, 6), &mut *rng);
         let c0 = &pk.0 * u + e0 + pt.0;
         let c1 = &pk.1 * u + e1;
         CkksCiphertext(c0, c1)
@@ -165,18 +164,23 @@ impl Ckks {
     pub fn eval_add(
         _: &CkksParam,
         _: &CkksEvaluationKey,
+        ct0: CkksCiphertext,
         ct1: CkksCiphertext,
-        ct2: CkksCiphertext,
     ) -> CkksCiphertext {
-        CkksCiphertext(ct1.0 + ct2.0, ct1.1 + ct2.1)
+        CkksCiphertext(ct0.0 + ct1.0, ct0.1 + ct1.1)
     }
 
     pub fn eval_mul(
-        _: &CkksParam,
-        _: &CkksEvaluationKey,
-        _: CkksCiphertext,
-        _: CkksCiphertext,
+        _param: &CkksParam,
+        _ek: &CkksEvaluationKey,
+        ct0: CkksCiphertext,
+        ct1: CkksCiphertext,
     ) -> CkksCiphertext {
+        let [_c0, _c1, _c2] = [
+            &ct0.0 * &ct1.0,
+            &ct0.0 * &ct1.1 + &ct0.1 * &ct1.0,
+            &ct0.1 * &ct1.1,
+        ];
         todo!()
     }
 }
@@ -284,14 +288,14 @@ mod test {
             let param = Ckks::param_gen(log_n, log_scale, qs);
             let (sk, pk, ek) = Ckks::key_gen(&param, rng);
 
+            let m0 = CkksCleartext(rng.sample_iter(Standard).take(param.l()).collect_vec());
             let m1 = CkksCleartext(rng.sample_iter(Standard).take(param.l()).collect_vec());
-            let m2 = CkksCleartext(rng.sample_iter(Standard).take(param.l()).collect_vec());
-            let m3 = izip!(&m1.0, &m2.0).map(|(m1, m2)| m1 + m2).collect_vec();
+            let m2 = izip!(&m0.0, &m1.0).map(|(m0, m1)| m0 + m1).collect_vec();
+            let ct0 = Ckks::encrypt(&param, &pk, Ckks::encode(&param, m0), rng);
             let ct1 = Ckks::encrypt(&param, &pk, Ckks::encode(&param, m1), rng);
-            let ct2 = Ckks::encrypt(&param, &pk, Ckks::encode(&param, m2), rng);
-            let ct3 = Ckks::eval_add(&param, &ek, ct1, ct2);
+            let ct2 = Ckks::eval_add(&param, &ek, ct0, ct1);
 
-            izip!(m3, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct3)).0)
+            izip!(m2, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct2)).0)
                 .for_each(|(lhs, rhs)| assert_eq_complex!(lhs, rhs, 1.0e-20));
         }
     }
