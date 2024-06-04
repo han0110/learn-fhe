@@ -78,14 +78,22 @@ impl Tggsw {
         TggswCiphertext(ct)
     }
 
-    pub fn decrypt(param: &TggswParam, sk: &TggswSecretKey, ct: &TggswCiphertext) -> TggswPlaintext {
+    pub fn decrypt(
+        param: &TggswParam,
+        sk: &TggswSecretKey,
+        ct: &TggswCiphertext,
+    ) -> TggswPlaintext {
         let (b, a) = ct.0.last().unwrap().split_last().unwrap();
         let ct = TglweCiphertext(a.into(), b.clone());
         let pt = Tglwe::decrypt(param, sk, &ct).0;
         TggswPlaintext(pt >> (param.log_q - param.ell * param.log_b))
     }
 
-    pub fn external_product(param: &TggswParam, ct1: &TggswCiphertext, ct2: &TglweCiphertext) -> TglweCiphertext {
+    pub fn external_product(
+        param: &TggswParam,
+        ct1: &TggswCiphertext,
+        ct2: &TglweCiphertext,
+    ) -> TglweCiphertext {
         let g_inv_ct2 = chain![ct2.a(), [ct2.b()]]
             .map(|value| value.clone().round(param.log_q - param.log_b * param.ell))
             .flat_map(|value| value.decompose(param.log_q, param.log_b).take(param.ell))
@@ -121,7 +129,10 @@ impl Tggsw {
 
 fn modulus_switch(log_from: usize, log_to: usize, ct: &TlweCiphertext) -> TlweCiphertext {
     TlweCiphertext(
-        ct.a().iter().map(|a| a.round_shr(log_from - log_to)).collect(),
+        ct.a()
+            .iter()
+            .map(|a| a.round_shr(log_from - log_to))
+            .collect(),
         ct.b().round_shr(log_from - log_to),
     )
 }
@@ -142,8 +153,13 @@ mod test {
     #[test]
     fn encrypt_decrypt() {
         let mut rng = StdRng::seed_from_u64(OsRng.next_u64());
-        let (log_q, log_p, padding, k, n, m, std_dev, log_b, ell) = (32, 8, 1, 2, 256, 32, 1.0e-8, 4, 2);
-        let param = Tggsw::param_gen(Tglwe::param_gen(log_q, log_p, padding, k, n, m, std_dev), log_b, ell);
+        let (log_q, log_p, padding, k, n, m, std_dev, log_b, ell) =
+            (32, 8, 1, 2, 256, 32, 1.0e-8, 4, 2);
+        let param = Tggsw::param_gen(
+            Tglwe::param_gen(log_q, log_p, padding, k, n, m, std_dev),
+            log_b,
+            ell,
+        );
         let (sk, pk) = Tggsw::key_gen(&param, &mut rng);
         for _ in 0..1 << log_p {
             let m = Polynomial::uniform_q(param.p(), n, &mut rng);
@@ -156,8 +172,13 @@ mod test {
     #[test]
     fn external_product() {
         let mut rng = StdRng::seed_from_u64(OsRng.next_u64());
-        let (log_q, log_p, padding, k, n, m, std_dev, log_b, ell) = (32, 8, 1, 2, 256, 32, 1.0e-8, 4, 8);
-        let param = Tggsw::param_gen(Tglwe::param_gen(log_q, log_p, padding, k, n, m, std_dev), log_b, ell);
+        let (log_q, log_p, padding, k, n, m, std_dev, log_b, ell) =
+            (32, 8, 1, 2, 256, 32, 1.0e-8, 4, 8);
+        let param = Tggsw::param_gen(
+            Tglwe::param_gen(log_q, log_p, padding, k, n, m, std_dev),
+            log_b,
+            ell,
+        );
         let (sk, pk) = Tggsw::key_gen(&param, &mut rng);
         for _ in 0..1 << log_p {
             let [m1, m2] = from_fn(|_| Polynomial::uniform_q(param.p(), n, &mut rng));
@@ -165,15 +186,23 @@ mod test {
             let ct1 = Tggsw::encrypt(&param, &pk, &Tggsw::encode(&param, &m1), &mut rng);
             let ct2 = Tglwe::encrypt(&param, &pk, &Tglwe::encode(&param, &m2), &mut rng);
             let ct3 = Tggsw::external_product(&param, &ct1, &ct2);
-            assert_eq!(m3, Tglwe::decode(&param, &Tglwe::decrypt(&param, &sk, &ct3)));
+            assert_eq!(
+                m3,
+                Tglwe::decode(&param, &Tglwe::decrypt(&param, &sk, &ct3))
+            );
         }
     }
 
     #[test]
     fn cmux() {
         let mut rng = StdRng::seed_from_u64(OsRng.next_u64());
-        let (log_q, log_p, padding, k, n, m, std_dev, log_b, ell) = (32, 8, 1, 2, 256, 32, 1.0e-8, 4, 8);
-        let param = Tggsw::param_gen(Tglwe::param_gen(log_q, log_p, padding, k, n, m, std_dev), log_b, ell);
+        let (log_q, log_p, padding, k, n, m, std_dev, log_b, ell) =
+            (32, 8, 1, 2, 256, 32, 1.0e-8, 4, 8);
+        let param = Tggsw::param_gen(
+            Tglwe::param_gen(log_q, log_p, padding, k, n, m, std_dev),
+            log_b,
+            ell,
+        );
         let (sk, pk) = Tggsw::key_gen(&param, &mut rng);
         for _ in 0..1 << log_p {
             let [b1, b2] = from_fn(|b| Polynomial::constant(Wrapping(b as u64), n));

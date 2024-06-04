@@ -79,7 +79,11 @@ impl Tgsw {
         TgswPlaintext(pt >> (param.log_q - param.ell * param.log_b))
     }
 
-    pub fn external_product(param: &TgswParam, ct1: &TgswCiphertext, ct2: &TlweCiphertext) -> TlweCiphertext {
+    pub fn external_product(
+        param: &TgswParam,
+        ct1: &TgswCiphertext,
+        ct2: &TlweCiphertext,
+    ) -> TlweCiphertext {
         let g_inv_ct2 = chain![ct2.a(), [ct2.b()]]
             .map(|value| value.round(param.log_q - param.log_b * param.ell))
             .flat_map(|value| value.decompose(param.log_q, param.log_b).take(param.ell))
@@ -89,7 +93,12 @@ impl Tgsw {
         TlweCiphertext(a.into(), *b)
     }
 
-    pub fn cmux(param: &TgswParam, b: &TgswCiphertext, ct1: &TlweCiphertext, ct2: &TlweCiphertext) -> TlweCiphertext {
+    pub fn cmux(
+        param: &TgswParam,
+        b: &TgswCiphertext,
+        ct1: &TlweCiphertext,
+        ct2: &TlweCiphertext,
+    ) -> TlweCiphertext {
         let d = Tgsw::external_product(param, b, &Tlwe::eval_sub(param, ct2, ct1));
         Tlwe::eval_add(param, &d, ct1)
     }
@@ -108,7 +117,11 @@ mod test {
     fn encrypt_decrypt() {
         let mut rng = StdRng::seed_from_u64(OsRng.next_u64());
         let (log_q, log_p, padding, n, m, std_dev, log_b, ell) = (32, 8, 1, 256, 32, 1.0e-8, 4, 2);
-        let param = Tgsw::param_gen(Tlwe::param_gen(log_q, log_p, padding, n, m, std_dev), log_b, ell);
+        let param = Tgsw::param_gen(
+            Tlwe::param_gen(log_q, log_p, padding, n, m, std_dev),
+            log_b,
+            ell,
+        );
         let (sk, pk) = Tgsw::key_gen(&param, &mut rng);
         for m in (0..1 << log_p).map(Wrapping) {
             let pt = Tgsw::encode(&param, &m);
@@ -121,7 +134,11 @@ mod test {
     fn external_product() {
         let mut rng = StdRng::seed_from_u64(OsRng.next_u64());
         let (log_q, log_p, padding, n, m, std_dev, log_b, ell) = (32, 8, 1, 256, 32, 1.0e-8, 4, 8);
-        let param = Tgsw::param_gen(Tlwe::param_gen(log_q, log_p, padding, n, m, std_dev), log_b, ell);
+        let param = Tgsw::param_gen(
+            Tlwe::param_gen(log_q, log_p, padding, n, m, std_dev),
+            log_b,
+            ell,
+        );
         let (sk, pk) = Tgsw::key_gen(&param, &mut rng);
         for _ in 0..1 << log_p {
             let [m1, m2] = from_fn(|_| Wrapping(rng.next_u64()) % param.p());
@@ -137,7 +154,11 @@ mod test {
     fn cmux() {
         let mut rng = StdRng::seed_from_u64(OsRng.next_u64());
         let (log_q, log_p, padding, n, m, std_dev, log_b, ell) = (32, 8, 1, 256, 32, 1.0e-8, 4, 8);
-        let param = Tgsw::param_gen(Tlwe::param_gen(log_q, log_p, padding, n, m, std_dev), log_b, ell);
+        let param = Tgsw::param_gen(
+            Tlwe::param_gen(log_q, log_p, padding, n, m, std_dev),
+            log_b,
+            ell,
+        );
         let (sk, pk) = Tgsw::key_gen(&param, &mut rng);
         for _ in 0..1 << log_p {
             let [m1, m2] = from_fn(|_| Wrapping(rng.next_u64()) % param.p());

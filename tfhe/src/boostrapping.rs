@@ -20,7 +20,12 @@ pub struct BoostrappingParam {
 pub struct BoostrappingKey(Vec<TggswCiphertext>, AdditiveVec<AdditiveVec<W64>>);
 
 impl Boostrapping {
-    pub fn param_gen(tlwe: TlweParam, tggsw: TggswParam, log_b: usize, ell: usize) -> BoostrappingParam {
+    pub fn param_gen(
+        tlwe: TlweParam,
+        tggsw: TggswParam,
+        log_b: usize,
+        ell: usize,
+    ) -> BoostrappingParam {
         BoostrappingParam {
             tlwe,
             tggsw,
@@ -136,10 +141,15 @@ mod test {
     #[test]
     fn boostrap() {
         let mut rng = StdRng::seed_from_u64(OsRng.next_u64());
-        let (log_q, log_p, padding, k, n, m, std_dev, log_b, ell) = (32, 3, 1, 1, 256, 32, 1.0e-8, 4, 8);
+        let (log_q, log_p, padding, k, n, m, std_dev, log_b, ell) =
+            (32, 3, 1, 1, 256, 32, 1.0e-8, 4, 8);
         let param1 = Tlwe::param_gen(log_q, log_p, padding, n, m, std_dev);
         let (sk1, pk1) = Tlwe::key_gen(&param1, &mut rng);
-        let param2 = Tggsw::param_gen(Tglwe::param_gen(log_q, log_p, padding, k, n, m, std_dev), log_b, ell);
+        let param2 = Tggsw::param_gen(
+            Tglwe::param_gen(log_q, log_p, padding, k, n, m, std_dev),
+            log_b,
+            ell,
+        );
         let (sk2, pk2) = Tggsw::key_gen(&param2, &mut rng);
         let param3 = Boostrapping::param_gen(param1, param2, log_b, ell);
         let bsk = Boostrapping::key_gen(&param3, &sk1, &pk1, &sk2, &pk2, &mut rng);
