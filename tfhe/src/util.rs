@@ -61,6 +61,13 @@ pub type Polynomial<T> = AdditiveVec<T>;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AdditiveVec<T>(Vec<T>);
 
+impl<T> AdditiveVec<T> {
+    pub fn into_split_last(mut self) -> Option<(T, Self)> {
+        let last = self.pop()?;
+        Some((last, self))
+    }
+}
+
 impl AdditiveVec<W64> {
     pub fn uniform_q(q: W64, n: usize, rng: &mut impl RngCore) -> Self {
         repeat_with(|| uniform_q(q, rng)).take(n).collect()
@@ -81,11 +88,6 @@ impl AdditiveVec<W64> {
             poly[i - n] = -Wrapping(1)
         }
         poly
-    }
-
-    pub fn into_split_last(mut self) -> Option<(W64, Self)> {
-        let last = self.pop()?;
-        Some((last, self))
     }
 }
 

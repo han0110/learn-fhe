@@ -89,8 +89,8 @@ impl Tgsw {
             .flat_map(|value| value.decompose(param.log_q, param.log_b).take(param.ell))
             .collect::<AdditiveVec<_>>();
         let ct3 = g_inv_ct2.dot(&ct1.0) % param.q();
-        let (b, a) = ct3.split_last().unwrap();
-        TlweCiphertext(a.into(), *b)
+        let (b, a) = ct3.into_split_last().unwrap();
+        TlweCiphertext(a, b)
     }
 
     pub fn cmux(
