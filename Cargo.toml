@@ -1,5 +1,5 @@
 [workspace]
-members = ["ckks", "tfhe"]
+members = ["ckks", "fhew", "tfhe"]
 resolver = "2"
 
 [workspace.dependencies]
