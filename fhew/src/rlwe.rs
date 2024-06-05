@@ -5,9 +5,9 @@ pub struct Rlwe;
 
 #[derive(Clone, Copy, Debug)]
 pub struct RlweParam {
-    pub(crate) q: u64,
-    pub(crate) p: u64,
-    pub(crate) n: usize,
+    q: u64,
+    p: u64,
+    n: usize,
 }
 
 impl RlweParam {
@@ -30,16 +30,28 @@ impl RlweParam {
 
 pub struct RlweSecretKey(Poly<Fq>);
 
-pub struct RlwePlaintext(Poly<Fq>);
+pub struct RlwePublicKey(Poly<Fq>, Poly<Fq>);
 
-pub struct RlweCiphertext(Poly<Fq>, Poly<Fq>);
-
-impl RlweCiphertext {
-    pub fn b(&self) -> &Poly<Fq> {
+impl RlwePublicKey {
+    pub fn a(&self) -> &Poly<Fq> {
         &self.0
     }
 
+    pub fn b(&self) -> &Poly<Fq> {
+        &self.1
+    }
+}
+
+pub struct RlwePlaintext(pub(crate) Poly<Fq>);
+
+pub struct RlweCiphertext(pub(crate) Poly<Fq>, pub(crate) Poly<Fq>);
+
+impl RlweCiphertext {
     pub fn a(&self) -> &Poly<Fq> {
+        &self.0
+    }
+
+    pub fn b(&self) -> &Poly<Fq> {
         &self.1
     }
 }
@@ -49,9 +61,15 @@ impl Rlwe {
         RlweParam { q, p, n }
     }
 
-    pub fn key_gen(param: &RlweParam, rng: &mut impl RngCore) -> RlweSecretKey {
-        let sk = Poly::sample_fq_from_i8(param.n, param.q(), &zo(0.5), rng);
-        RlweSecretKey(sk)
+    pub fn key_gen(param: &RlweParam, rng: &mut impl RngCore) -> (RlweSecretKey, RlwePublicKey) {
+        let sk = RlweSecretKey(Poly::sample_fq_from_i8(param.n(), param.q(), &zo(0.5), rng));
+        let pk = {
+            let a = Poly::sample_fq_uniform(param.n(), param.q(), rng);
+            let e = Poly::sample_fq_from_i8(param.n(), param.q(), &dg(3.2, 6), rng);
+            let b = &a * &sk.0 + e;
+            RlwePublicKey(a, b)
+        };
+        (sk, pk)
     }
 
     pub fn encode(param: &RlweParam, m: &Poly<Fq>) -> RlwePlaintext {
@@ -69,28 +87,29 @@ impl Rlwe {
 
     pub fn encrypt(
         param: &RlweParam,
-        sk: &RlweSecretKey,
+        pk: &RlwePublicKey,
         pt: &RlwePlaintext,
         rng: &mut impl RngCore,
     ) -> RlweCiphertext {
-        let a = Poly::sample_fq_uniform(param.n, param.q(), rng);
-        let e = Poly::sample_fq_from_i8(param.n, param.q(), &dg(3.2, 6), rng);
-        let b = &a * &sk.0 + &pt.0 + e;
-        RlweCiphertext(b, a)
+        let u = &Poly::sample_fq_from_i8(param.n(), param.q(), &zo(0.5), rng);
+        let e0 = Poly::sample_fq_from_i8(param.n(), param.q(), &dg(3.2, 6), rng);
+        let e1 = Poly::sample_fq_from_i8(param.n(), param.q(), &dg(3.2, 6), rng);
+        let a = pk.a() * u + e0;
+        let b = pk.b() * u + e1 + &pt.0;
+        RlweCiphertext(a, b)
     }
 
     pub fn decrypt(_: &RlweParam, sk: &RlweSecretKey, ct: &RlweCiphertext) -> RlwePlaintext {
-        let RlweCiphertext(b, a) = ct;
-        let pt = b - a * &sk.0;
+        let pt = ct.b() - ct.a() * &sk.0;
         RlwePlaintext(pt)
     }
 
     pub fn eval_add(_: &RlweParam, ct0: &RlweCiphertext, ct1: &RlweCiphertext) -> RlweCiphertext {
-        RlweCiphertext(ct0.b() + ct1.b(), ct0.a() + ct1.a())
+        RlweCiphertext(ct0.a() + ct1.a(), ct0.b() + ct1.b())
     }
 
     pub fn eval_sub(_: &RlweParam, ct0: &RlweCiphertext, ct1: &RlweCiphertext) -> RlweCiphertext {
-        RlweCiphertext(ct0.b() - ct1.b(), ct0.a() - ct1.a())
+        RlweCiphertext(ct0.a() - ct1.a(), ct0.b() - ct1.b())
     }
 }
 
@@ -100,8 +119,8 @@ mod test {
         rlwe::Rlwe,
         util::{two_adic_primes, Poly},
     };
+    use core::array::from_fn;
     use rand::{rngs::StdRng, SeedableRng};
-    use std::array::from_fn;
 
     #[test]
     fn encrypt_decrypt() {
@@ -111,10 +130,10 @@ mod test {
             let (n, p) = (1 << log_n, 1 << log_p);
             for q in two_adic_primes(log_q, log_n + 1).take(10) {
                 let param = Rlwe::param_gen(q, p, n);
-                let sk = Rlwe::key_gen(&param, &mut rng);
+                let (sk, pk) = Rlwe::key_gen(&param, &mut rng);
                 let m = Poly::sample_fq_uniform(n, p, &mut rng);
                 let pt = Rlwe::encode(&param, &m);
-                let ct = Rlwe::encrypt(&param, &sk, &pt, &mut rng);
+                let ct = Rlwe::encrypt(&param, &pk, &pt, &mut rng);
                 assert_eq!(m, Rlwe::decode(&param, &Rlwe::decrypt(&param, &sk, &ct)));
             }
         }
@@ -128,10 +147,10 @@ mod test {
             let (n, p) = (1 << log_n, 1 << log_p);
             for q in two_adic_primes(log_q, log_n + 1).take(10) {
                 let param = Rlwe::param_gen(q, p, n);
-                let sk = Rlwe::key_gen(&param, &mut rng);
+                let (sk, pk) = Rlwe::key_gen(&param, &mut rng);
                 let [m0, m1] = &from_fn(|_| Poly::sample_fq_uniform(n, p, &mut rng));
                 let [pt0, pt1] = [m0, m1].map(|m| Rlwe::encode(&param, m));
-                let [ct0, ct1] = [pt0, pt1].map(|pt| Rlwe::encrypt(&param, &sk, &pt, &mut rng));
+                let [ct0, ct1] = [pt0, pt1].map(|pt| Rlwe::encrypt(&param, &pk, &pt, &mut rng));
                 let ct2 = Rlwe::eval_add(&param, &ct0, &ct1);
                 let m2 = m0 + m1;
                 assert_eq!(m2, Rlwe::decode(&param, &Rlwe::decrypt(&param, &sk, &ct2)));
@@ -147,10 +166,10 @@ mod test {
             let (n, p) = (1 << log_n, 1 << log_p);
             for q in two_adic_primes(log_q, log_n + 1).take(10) {
                 let param = Rlwe::param_gen(q, p, n);
-                let sk = Rlwe::key_gen(&param, &mut rng);
+                let (sk, pk) = Rlwe::key_gen(&param, &mut rng);
                 let [m0, m1] = &from_fn(|_| Poly::sample_fq_uniform(n, p, &mut rng));
                 let [pt0, pt1] = [m0, m1].map(|m| Rlwe::encode(&param, m));
-                let [ct0, ct1] = [pt0, pt1].map(|pt| Rlwe::encrypt(&param, &sk, &pt, &mut rng));
+                let [ct0, ct1] = [pt0, pt1].map(|pt| Rlwe::encrypt(&param, &pk, &pt, &mut rng));
                 let ct2 = Rlwe::eval_sub(&param, &ct0, &ct1);
                 let m2 = m0 - m1;
                 assert_eq!(m2, Rlwe::decode(&param, &Rlwe::decrypt(&param, &sk, &ct2)));

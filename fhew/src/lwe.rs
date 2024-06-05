@@ -5,9 +5,9 @@ pub struct Lwe;
 
 #[derive(Clone, Copy, Debug)]
 pub struct LweParam {
-    pub(crate) log_q: usize,
-    pub(crate) log_p: usize,
-    pub(crate) n: usize,
+    log_q: usize,
+    log_p: usize,
+    n: usize,
 }
 
 impl LweParam {
@@ -32,15 +32,14 @@ pub struct LweSecretKey(AVec<Fq>);
 
 pub struct LwePlaintext(Fq);
 
-pub struct LweCiphertext(Fq, AVec<Fq>);
+pub struct LweCiphertext(AVec<Fq>, Fq);
 
 impl LweCiphertext {
-    pub fn b(&self) -> Fq {
-        self.0
-    }
-
     pub fn a(&self) -> &AVec<Fq> {
-        &self.1
+        &self.0
+    }
+    pub fn b(&self) -> Fq {
+        self.1
     }
 }
 
@@ -72,21 +71,20 @@ impl Lwe {
         let a = AVec::sample_fq_uniform(param.n, param.q(), rng);
         let e = Fq::sample_i8(param.q(), &dg(3.2, 6), rng);
         let b = a.dot(&sk.0) + pt.0 + e;
-        LweCiphertext(b, a)
+        LweCiphertext(a, b)
     }
 
     pub fn decrypt(_: &LweParam, sk: &LweSecretKey, ct: &LweCiphertext) -> LwePlaintext {
-        let LweCiphertext(b, a) = ct;
-        let pt = b - a.dot(&sk.0);
+        let pt = ct.b() - ct.a().dot(&sk.0);
         LwePlaintext(pt)
     }
 
     pub fn eval_add(_: &LweParam, ct0: &LweCiphertext, ct1: &LweCiphertext) -> LweCiphertext {
-        LweCiphertext(ct0.b() + ct1.b(), ct0.a() + ct1.a())
+        LweCiphertext(ct0.a() + ct1.a(), ct0.b() + ct1.b())
     }
 
     pub fn eval_sub(_: &LweParam, ct0: &LweCiphertext, ct1: &LweCiphertext) -> LweCiphertext {
-        LweCiphertext(ct0.b() - ct1.b(), ct0.a() - ct1.a())
+        LweCiphertext(ct0.a() - ct1.a(), ct0.b() - ct1.b())
     }
 }
 

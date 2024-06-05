@@ -3,10 +3,10 @@ use core::{
     borrow::Borrow,
     fmt::{self, Display, Formatter},
     iter::{repeat_with, Sum},
-    ops::{AddAssign, Deref, DerefMut, MulAssign, Neg, SubAssign},
+    ops::{AddAssign, Deref, DerefMut, Mul, MulAssign, Neg, SubAssign},
     slice,
 };
-use itertools::izip;
+use itertools::{izip, Itertools};
 use rand::RngCore;
 use rand_distr::Distribution;
 use std::vec;
@@ -34,6 +34,15 @@ impl AVec<Fq> {
         repeat_with(|| Fq::sample_i8(q, dist, rng))
             .take(n)
             .collect()
+    }
+
+    pub fn round_shr(&self, bits: usize) -> Self {
+        self.iter().map(|v| v.round_shr(bits)).collect()
+    }
+
+    pub fn decompose(&self, log_b: usize, k: usize) -> impl Iterator<Item = Self> {
+        let mut iters = self.iter().map(|v| v.decompose(log_b, k)).collect_vec();
+        (0..k).map(move |_| iters.iter_mut().map(|iter| iter.next().unwrap()).collect())
     }
 }
 
@@ -104,6 +113,15 @@ impl<'a, T> IntoIterator for &'a AVec<T> {
     }
 }
 
+impl<'a, T> IntoIterator for &'a mut AVec<T> {
+    type Item = &'a mut T;
+    type IntoIter = slice::IterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter_mut()
+    }
+}
+
 impl<T> Neg for AVec<T>
 where
     for<'t> &'t T: Neg<Output = T>,
@@ -167,11 +185,16 @@ where
     }
 }
 
-impl Dot<&AVec<Fq>> for AVec<Fq> {
-    type Output = Fq;
+impl<'a, T, I> Dot<I> for AVec<T>
+where
+    T: 'a + Sum,
+    for<'t> &'t T: Mul<&'t T, Output = T>,
+    I: IntoIterator<Item = &'a T>,
+{
+    type Output = T;
 
-    fn dot(&self, rhs: &AVec<Fq>) -> Self::Output {
-        izip!(&self.0, &rhs.0).map(|(lhs, rhs)| lhs + rhs).sum()
+    fn dot(&self, rhs: I) -> Self::Output {
+        izip!(&self.0, rhs).map(|(lhs, rhs)| lhs * rhs).sum()
     }
 }
 

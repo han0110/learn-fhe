@@ -28,6 +28,11 @@ impl<T> Poly<T> {
 }
 
 impl Poly<Fq> {
+    pub fn zero(n: usize, q: u64) -> Self {
+        assert!(n.is_power_of_two());
+        Self(vec![Fq::from_u64(q, 0); n].into())
+    }
+
     pub fn sample_fq_uniform(n: usize, q: u64, rng: &mut impl RngCore) -> Self {
         assert!(n.is_power_of_two());
         Self(AVec::sample_fq_uniform(n, q, rng))
@@ -41,6 +46,14 @@ impl Poly<Fq> {
     ) -> Self {
         assert!(n.is_power_of_two());
         Self(AVec::sample_fq_from_i8(n, q, dist, rng))
+    }
+
+    pub fn round_shr(&self, bits: usize) -> Self {
+        Self(self.0.round_shr(bits))
+    }
+
+    pub fn decompose(&self, log_b: usize, k: usize) -> impl Iterator<Item = Self> {
+        self.0.decompose(log_b, k).map(Self)
     }
 }
 
@@ -103,6 +116,15 @@ impl<'a, T> IntoIterator for &'a Poly<T> {
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a mut Poly<T> {
+    type Item = &'a mut T;
+    type IntoIter = slice::IterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter_mut()
     }
 }
 
@@ -308,8 +330,8 @@ mod test {
         fq::two_adic_primes,
         poly::{neg_schoolbook_mul, Poly},
     };
+    use core::array::from_fn;
     use rand::{rngs::StdRng, SeedableRng};
-    use std::array::from_fn;
 
     #[test]
     fn neg_mul() {

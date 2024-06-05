@@ -74,13 +74,23 @@ impl Fq {
         self
     }
 
-    pub fn powers(&self) -> impl Iterator<Item = Self> + '_ {
+    pub fn powers(self) -> impl Iterator<Item = Self> {
         successors(Some(Fq::from_i8(self.q, 1)), move |v| Some(v * self))
     }
 
     pub fn inv(self) -> Option<Self> {
         (self.v != 0)
             .then(move || Self::from_i64(self.q, (self.v as i64).extended_gcd(&(self.q as i64)).x))
+    }
+
+    pub fn round_shr(mut self, bits: usize) -> Self {
+        self.v = ((self.v + ((1 << bits) >> 1)) % self.q) >> bits;
+        self
+    }
+
+    pub fn decompose(self, log_b: usize, k: usize) -> impl Iterator<Item = Self> {
+        assert_eq!(self.v >> (log_b * k), 0);
+        (0..k).map(move |i| Self::from_u64(self.q, (self.v >> (log_b * i)) & ((1 << log_b) - 1)))
     }
 }
 
