@@ -6,7 +6,8 @@ mod fq;
 mod poly;
 
 pub use avec::AVec;
-pub use fq::Fq;
+pub use fq::{two_adic_primes, Fq};
+pub use poly::Poly;
 
 pub trait Dot<Rhs = Self> {
     type Output;

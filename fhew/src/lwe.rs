@@ -52,11 +52,11 @@ impl Lwe {
 
     pub fn encode(param: &LweParam, m: &u64) -> LwePlaintext {
         assert!(*m < param.p());
-        LwePlaintext(Fq::from_u64(param.q(), *m) << param.log_delta())
+        LwePlaintext(Fq::from_u64(param.q(), m << param.log_delta()))
     }
 
     pub fn decode(param: &LweParam, pt: &LwePlaintext) -> u64 {
-        (pt.0 >> param.log_delta()).into()
+        u64::from(pt.0) >> param.log_delta()
     }
 
     pub fn encrypt(

@@ -3,27 +3,20 @@ use core::{
     borrow::Borrow,
     fmt::{self, Display, Formatter},
     iter::{repeat_with, Sum},
-    ops::{AddAssign, Deref, DerefMut, MulAssign, Neg, ShlAssign, ShrAssign, SubAssign},
+    ops::{AddAssign, Deref, DerefMut, MulAssign, Neg, SubAssign},
     slice,
 };
 use itertools::izip;
 use rand::RngCore;
-use rand_distr::{Distribution, Uniform};
+use rand_distr::Distribution;
 use std::vec;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AVec<T>(Vec<T>);
 
-impl<T> AVec<T> {
-    pub fn sample(n: usize, dist: &impl Distribution<T>, rng: &mut impl RngCore) -> Self {
-        repeat_with(|| dist.sample(rng)).take(n).collect()
-    }
-}
-
 impl AVec<Fq> {
     pub fn sample_uniform(n: usize, q: u64, rng: &mut impl RngCore) -> Self {
-        let dist = Uniform::new(0, q).map(move |v| Fq::from_u64(q, v));
-        Self::sample(n, &dist, rng)
+        repeat_with(|| Fq::sample_uniform(q, rng)).take(n).collect()
     }
 
     pub fn sample_i8(
@@ -32,7 +25,9 @@ impl AVec<Fq> {
         dist: &impl Distribution<i8>,
         rng: &mut impl RngCore,
     ) -> Self {
-        Self::sample(n, &dist.map(|v| Fq::from_i8(q, v)), rng)
+        repeat_with(|| Fq::sample_i8(q, dist, rng))
+            .take(n)
+            .collect()
     }
 }
 
@@ -155,24 +150,6 @@ where
     }
 }
 
-impl<T> ShlAssign<&usize> for AVec<T>
-where
-    for<'t> T: ShlAssign<&'t usize>,
-{
-    fn shl_assign(&mut self, rhs: &usize) {
-        self.0.iter_mut().for_each(|value| *value <<= rhs);
-    }
-}
-
-impl<T> ShrAssign<&usize> for AVec<T>
-where
-    for<'t> T: ShrAssign<&'t usize>,
-{
-    fn shr_assign(&mut self, rhs: &usize) {
-        self.0.iter_mut().for_each(|value| *value >>= rhs);
-    }
-}
-
 impl<T, Item> Sum<Item> for AVec<T>
 where
     T: Clone + for<'t> AddAssign<&'t T>,
@@ -193,11 +170,11 @@ impl Dot<&AVec<Fq>> for AVec<Fq> {
 }
 
 macro_rules! impl_ops {
-    (@ impl<T$(: $generic:ty)?> $trait:ident<$rhs:ty> for $lhs:ty; type Output = $out:ty; $rhs_el:ty; $lhs_convert:expr) => {
+    (@ impl<T$(: $generic:ty)?> $trait:ident<$rhs:ty> for $lhs:ty; type Output = $out:ty; $lhs_convert:expr) => {
         paste::paste! {
             impl<T $(: $generic)?> core::ops::$trait<$rhs> for $lhs
             where
-                for<'t> T: [<$trait Assign>]<&'t $rhs_el>,
+                for<'t> T: [<$trait Assign>]<&'t T>,
             {
                 type Output = $out;
 
@@ -209,32 +186,30 @@ macro_rules! impl_ops {
             }
         }
     };
-    ($(impl<T> $trait:ident<$rhs:ty> for $lhs:ty; $rhs_el:ty),* $(,)?) => {
+    ($(impl<T> $trait:ident<$rhs:ty> for $lhs:ty),* $(,)?) => {
         $(
             paste::paste! {
                 impl<T> core::ops::[<$trait Assign>]<$rhs> for $lhs
                 where
-                    for<'t> T: [<$trait Assign>]<&'t $rhs_el>,
+                    for<'t> T: [<$trait Assign>]<&'t T>,
                 {
                     fn [<$trait:lower _assign>](&mut self, rhs: $rhs) {
                         self.[<$trait:lower _assign>](&rhs);
                     }
                 }
             }
-            impl_ops!(@ impl<T> $trait<$rhs> for $lhs; type Output = $lhs; $rhs_el; core::convert::identity);
-            impl_ops!(@ impl<T> $trait<&$rhs> for $lhs; type Output = $lhs; $rhs_el; core::convert::identity);
-            impl_ops!(@ impl<T: Clone> $trait<$rhs> for &$lhs; type Output = $lhs; $rhs_el; <_>::clone);
-            impl_ops!(@ impl<T: Clone> $trait<&$rhs> for &$lhs; type Output = $lhs; $rhs_el; <_>::clone);
+            impl_ops!(@ impl<T> $trait<$rhs> for $lhs; type Output = $lhs; core::convert::identity);
+            impl_ops!(@ impl<T> $trait<&$rhs> for $lhs; type Output = $lhs; core::convert::identity);
+            impl_ops!(@ impl<T: Clone> $trait<$rhs> for &$lhs; type Output = $lhs; <_>::clone);
+            impl_ops!(@ impl<T: Clone> $trait<&$rhs> for &$lhs; type Output = $lhs; <_>::clone);
         )*
     };
 }
 
 impl_ops!(
-    impl<T> Add<AVec<T>> for AVec<T>; T,
-    impl<T> Sub<AVec<T>> for AVec<T>; T,
-    impl<T> Mul<T> for AVec<T>; T,
-    impl<T> Shl<usize> for AVec<T>; usize,
-    impl<T> Shr<usize> for AVec<T>; usize,
+    impl<T> Add<AVec<T>> for AVec<T>,
+    impl<T> Sub<AVec<T>> for AVec<T>,
+    impl<T> Mul<T> for AVec<T>,
 );
 
 pub(crate) use impl_ops;
