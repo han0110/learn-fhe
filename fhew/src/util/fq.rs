@@ -11,7 +11,10 @@ use num_integer::Integer;
 use num_traits::ToPrimitive;
 use rand::RngCore;
 use rand_distr::{Distribution, Uniform};
-use std::{collections::HashMap, sync::OnceLock};
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Fq {
@@ -41,6 +44,10 @@ impl Fq {
     pub fn from_i64(q: u64, v: i64) -> Self {
         let v = v.rem_euclid(q as i64) as u64;
         Self { q, v }
+    }
+
+    pub fn from_f64(q: u64, v: f64) -> Self {
+        Self::from_i64(q, v.round() as i64)
     }
 
     pub fn sample_uniform(q: u64, rng: &mut impl RngCore) -> Self {
@@ -75,16 +82,29 @@ impl Fq {
         (self.v != 0)
             .then(move || Self::from_i64(self.q, (self.v as i64).extended_gcd(&(self.q as i64)).x))
     }
-
-    pub fn round(mut self, bits: usize) -> Self {
-        self.v = (self.v + ((1 << bits) >> 1)) >> bits;
-        self
-    }
 }
 
 impl From<Fq> for u64 {
     fn from(value: Fq) -> Self {
         value.v
+    }
+}
+
+impl From<&Fq> for u64 {
+    fn from(value: &Fq) -> Self {
+        value.v
+    }
+}
+
+impl From<Fq> for f64 {
+    fn from(value: Fq) -> Self {
+        value.v as f64
+    }
+}
+
+impl From<&Fq> for f64 {
+    fn from(value: &Fq) -> Self {
+        value.v as f64
     }
 }
 
@@ -189,21 +209,19 @@ impl_ops!(
     impl Mul<Fq> for Fq,
 );
 
-pub(crate) static mut NEG_NTT_PSI: OnceLock<HashMap<u64, [Vec<Fq>; 2]>> = OnceLock::new();
+pub(crate) static NEG_NTT_PSI: OnceLock<Mutex<HashMap<u64, [Vec<Fq>; 2]>>> = OnceLock::new();
 
 pub fn two_adic_primes(bits: usize, log_n: usize) -> impl Iterator<Item = u64> {
     assert!(bits > log_n);
 
     let (min, max) = (1 << (bits - log_n - 1), 1 << (bits - log_n));
     primes((min..max).rev().map(move |q| (q << log_n) + 1)).map(|q| {
-        unsafe {
-            NEG_NTT_PSI.get_or_init(Default::default);
-            NEG_NTT_PSI
-                .get_mut()
-                .unwrap()
-                .entry(q)
-                .or_insert_with(|| neg_ntt_psi(q));
-        };
+        NEG_NTT_PSI
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .entry(q)
+            .or_insert_with(|| neg_ntt_psi(q));
         q
     })
 }

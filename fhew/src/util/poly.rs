@@ -21,22 +21,26 @@ impl<T> Poly<T> {
     pub fn n(&self) -> usize {
         self.len()
     }
+
+    pub fn sample(n: usize, dist: &impl Distribution<T>, rng: &mut impl RngCore) -> Self {
+        Self(AVec::sample(n, dist, rng))
+    }
 }
 
 impl Poly<Fq> {
-    pub fn sample_uniform(n: usize, q: u64, rng: &mut impl RngCore) -> Self {
+    pub fn sample_fq_uniform(n: usize, q: u64, rng: &mut impl RngCore) -> Self {
         assert!(n.is_power_of_two());
-        Self(AVec::sample_uniform(n, q, rng))
+        Self(AVec::sample_fq_uniform(n, q, rng))
     }
 
-    pub fn sample_i8(
+    pub fn sample_fq_from_i8(
         n: usize,
         q: u64,
         dist: &impl Distribution<i8>,
         rng: &mut impl RngCore,
     ) -> Self {
         assert!(n.is_power_of_two());
-        Self(AVec::sample_i8(n, q, dist, rng))
+        Self(AVec::sample_fq_from_i8(n, q, dist, rng))
     }
 }
 
@@ -155,14 +159,16 @@ impl MulAssign<&Poly<Fq>> for Poly<Fq> {
     fn mul_assign(&mut self, rhs: &Poly<Fq>) {
         assert_eq!(self.len(), rhs.len());
 
-        if let Some([psi, psi_inv]) = unsafe {
-            &NEG_NTT_PSI
-                .get_or_init(Default::default)
-                .get(&self.0[0].q())
-        } {
-            neg_ntt_mul_assign(self, rhs, psi, psi_inv);
-        } else {
-            *self = neg_schoolbook_mul(self, rhs);
+        match NEG_NTT_PSI
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .get(&self.0[0].q())
+        {
+            Some([psi, psi_inv]) if self.n() <= psi.len() => {
+                neg_ntt_mul_assign(self, rhs, psi, psi_inv)
+            }
+            _ => *self = neg_schoolbook_mul(self, rhs),
         }
     }
 }
@@ -311,7 +317,7 @@ mod test {
         for log_n in 0..10 {
             let n = 1 << log_n;
             for q in two_adic_primes(45, log_n + 1).take(10) {
-                let [a, b] = &from_fn(|_| Poly::sample_uniform(n, q, &mut rng));
+                let [a, b] = &from_fn(|_| Poly::sample_fq_uniform(n, q, &mut rng));
                 assert_eq!(a * b, neg_schoolbook_mul(a, b));
             }
         }

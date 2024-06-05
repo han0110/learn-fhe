@@ -14,12 +14,18 @@ use std::vec;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AVec<T>(Vec<T>);
 
+impl<T> AVec<T> {
+    pub fn sample(n: usize, dist: &impl Distribution<T>, rng: &mut impl RngCore) -> Self {
+        repeat_with(|| dist.sample(rng)).take(n).collect()
+    }
+}
+
 impl AVec<Fq> {
-    pub fn sample_uniform(n: usize, q: u64, rng: &mut impl RngCore) -> Self {
+    pub fn sample_fq_uniform(n: usize, q: u64, rng: &mut impl RngCore) -> Self {
         repeat_with(|| Fq::sample_uniform(q, rng)).take(n).collect()
     }
 
-    pub fn sample_i8(
+    pub fn sample_fq_from_i8(
         n: usize,
         q: u64,
         dist: &impl Distribution<i8>,

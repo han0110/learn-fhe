@@ -19,8 +19,12 @@ impl LweParam {
         1 << self.log_p
     }
 
-    pub fn log_delta(&self) -> usize {
-        self.log_q - self.log_p
+    pub fn n(&self) -> usize {
+        self.n
+    }
+
+    pub fn delta(&self) -> u64 {
+        1 << (self.log_q - self.log_p)
     }
 }
 
@@ -46,17 +50,17 @@ impl Lwe {
     }
 
     pub fn key_gen(param: &LweParam, rng: &mut impl RngCore) -> LweSecretKey {
-        let sk = AVec::sample_i8(param.n, param.q(), &zo(0.5), rng);
+        let sk = AVec::sample_fq_from_i8(param.n, param.q(), &zo(0.5), rng);
         LweSecretKey(sk)
     }
 
-    pub fn encode(param: &LweParam, m: &u64) -> LwePlaintext {
-        assert!(*m < param.p());
-        LwePlaintext(Fq::from_u64(param.q(), m << param.log_delta()))
+    pub fn encode(param: &LweParam, m: &Fq) -> LwePlaintext {
+        assert_eq!(m.q(), param.p());
+        LwePlaintext(Fq::from_u64(param.q(), u64::from(m) * param.delta()))
     }
 
-    pub fn decode(param: &LweParam, pt: &LwePlaintext) -> u64 {
-        u64::from(pt.0) >> param.log_delta()
+    pub fn decode(param: &LweParam, pt: &LwePlaintext) -> Fq {
+        Fq::from_f64(param.p(), f64::from(pt.0) / param.delta() as f64)
     }
 
     pub fn encrypt(
@@ -65,15 +69,15 @@ impl Lwe {
         pt: &LwePlaintext,
         rng: &mut impl RngCore,
     ) -> LweCiphertext {
-        let a = AVec::sample_uniform(param.n, param.q(), rng);
+        let a = AVec::sample_fq_uniform(param.n, param.q(), rng);
         let e = Fq::sample_i8(param.q(), &dg(3.2, 6), rng);
         let b = a.dot(&sk.0) + pt.0 + e;
         LweCiphertext(b, a)
     }
 
-    pub fn decrypt(param: &LweParam, sk: &LweSecretKey, ct: &LweCiphertext) -> LwePlaintext {
+    pub fn decrypt(_: &LweParam, sk: &LweSecretKey, ct: &LweCiphertext) -> LwePlaintext {
         let LweCiphertext(b, a) = ct;
-        let pt = (b - a.dot(&sk.0)).round(param.log_delta());
+        let pt = b - a.dot(&sk.0);
         LwePlaintext(pt)
     }
 
@@ -88,7 +92,7 @@ impl Lwe {
 
 #[cfg(test)]
 mod test {
-    use crate::lwe::Lwe;
+    use crate::{lwe::Lwe, util::Fq};
     use itertools::Itertools;
     use rand::{rngs::StdRng, SeedableRng};
 
@@ -99,6 +103,7 @@ mod test {
         let param = Lwe::param_gen(log_q, log_p, n);
         let sk = Lwe::key_gen(&param, &mut rng);
         for m in 0..param.p() {
+            let m = Fq::from_u64(param.p(), m);
             let pt = Lwe::encode(&param, &m);
             let ct = Lwe::encrypt(&param, &sk, &pt, &mut rng);
             assert_eq!(m, Lwe::decode(&param, &Lwe::decrypt(&param, &sk, &ct)));
@@ -112,10 +117,11 @@ mod test {
         let param = Lwe::param_gen(log_q, log_p, n);
         let sk = Lwe::key_gen(&param, &mut rng);
         for (m0, m1) in (0..param.p()).cartesian_product(0..param.p()) {
-            let m2 = m0.wrapping_add(m1) % param.p();
+            let [m0, m1] = [m0, m1].map(|m| Fq::from_u64(param.p(), m));
             let [pt0, pt1] = [m0, m1].map(|m| Lwe::encode(&param, &m));
             let [ct0, ct1] = [pt0, pt1].map(|pt| Lwe::encrypt(&param, &sk, &pt, &mut rng));
             let ct2 = Lwe::eval_add(&param, &ct0, &ct1);
+            let m2 = m0 + m1;
             assert_eq!(m2, Lwe::decode(&param, &Lwe::decrypt(&param, &sk, &ct2)));
         }
     }
@@ -127,10 +133,11 @@ mod test {
         let param = Lwe::param_gen(log_q, log_p, n);
         let sk = Lwe::key_gen(&param, &mut rng);
         for (m0, m1) in (0..param.p()).cartesian_product(0..param.p()) {
-            let m2 = m0.wrapping_sub(m1) % param.p();
+            let [m0, m1] = [m0, m1].map(|m| Fq::from_u64(param.p(), m));
             let [pt0, pt1] = [m0, m1].map(|m| Lwe::encode(&param, &m));
             let [ct0, ct1] = [pt0, pt1].map(|pt| Lwe::encrypt(&param, &sk, &pt, &mut rng));
             let ct2 = Lwe::eval_sub(&param, &ct0, &ct1);
+            let m2 = m0 - m1;
             assert_eq!(m2, Lwe::decode(&param, &Lwe::decrypt(&param, &sk, &ct2)));
         }
     }
