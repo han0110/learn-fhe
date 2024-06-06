@@ -1,12 +1,12 @@
-use crate::util::{fq::Fq, Dot};
+use crate::util::fq::Fq;
 use core::{
     borrow::Borrow,
     fmt::{self, Display, Formatter},
     iter::{repeat_with, Sum},
-    ops::{AddAssign, Deref, DerefMut, Mul, MulAssign, Neg, SubAssign},
+    ops::{AddAssign, Deref, DerefMut, MulAssign, Neg, SubAssign},
     slice,
 };
-use itertools::{izip, Itertools};
+use itertools::izip;
 use rand::RngCore;
 use rand_distr::Distribution;
 use std::vec;
@@ -51,6 +51,12 @@ impl<T> DerefMut for AVec<T> {
     }
 }
 
+impl<T> Default for AVec<T> {
+    fn default() -> Self {
+        Self(Vec::new())
+    }
+}
+
 impl<T: Display> Display for AVec<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "[")?;
@@ -77,6 +83,12 @@ impl<T> From<Vec<T>> for AVec<T> {
 impl<'a, T: Clone> From<&'a [T]> for AVec<T> {
     fn from(value: &'a [T]) -> Self {
         Self(value.into())
+    }
+}
+
+impl<T> Extend<T> for AVec<T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        self.0.extend(iter)
     }
 }
 
@@ -173,19 +185,6 @@ where
     fn sum<I: Iterator<Item = Item>>(mut iter: I) -> Self {
         let init = iter.next().unwrap().borrow().clone();
         iter.fold(init, |acc, item| acc + item.borrow())
-    }
-}
-
-impl<'a, T, I> Dot<I> for AVec<T>
-where
-    T: 'a + Sum,
-    for<'t> &'t T: Mul<&'t T, Output = T>,
-    I: IntoIterator<Item = &'a T>,
-{
-    type Output = T;
-
-    fn dot(&self, rhs: I) -> Self::Output {
-        self.0.iter().zip_eq(rhs).map(|(lhs, rhs)| lhs * rhs).sum()
     }
 }
 

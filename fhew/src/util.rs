@@ -1,5 +1,6 @@
+use core::{f64::consts::SQRT_2, iter::Sum, ops::Mul};
+use itertools::Itertools;
 use rand_distr::{Distribution, Standard, WeightedIndex};
-use std::f64::consts::SQRT_2;
 
 mod avec;
 mod decompose;
@@ -11,10 +12,25 @@ pub use decompose::{Decomposable, Decomposor};
 pub use fq::{two_adic_primes, Fq};
 pub use poly::Poly;
 
-pub trait Dot<Rhs = Self> {
+pub trait Dot<Rhs> {
     type Output;
 
-    fn dot(&self, rhs: Rhs) -> Self::Output;
+    fn dot(self, rhs: Rhs) -> Self::Output;
+}
+
+impl<'a, L, R, IR, IL> Dot<IR> for IL
+where
+    IL: IntoIterator<Item = &'a L>,
+    IR: IntoIterator<Item = &'a R>,
+    L: 'a + Sum,
+    R: 'a,
+    &'a L: Mul<&'a R, Output = L>,
+{
+    type Output = L;
+
+    fn dot(self, rhs: IR) -> Self::Output {
+        L::sum(self.into_iter().zip_eq(rhs).map(|(lhs, rhs)| lhs * rhs))
+    }
 }
 
 pub fn zo(rho: f64) -> impl Distribution<i8> {

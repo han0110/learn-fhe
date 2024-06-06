@@ -37,6 +37,16 @@ pub struct RgswPlaintext(Poly<Fq>);
 
 pub struct RgswCiphertext(Vec<RlweCiphertext>);
 
+impl RgswCiphertext {
+    pub fn a(&self) -> impl Iterator<Item = &Poly<Fq>> {
+        self.0.iter().map(|ct| ct.a())
+    }
+
+    pub fn b(&self) -> impl Iterator<Item = &Poly<Fq>> {
+        self.0.iter().map(|ct| ct.b())
+    }
+}
+
 impl Rgsw {
     pub fn key_gen(param: &RgswParam, rng: &mut impl RngCore) -> (RgswSecretKey, RgswPublicKey) {
         Rlwe::key_gen(param, rng)
@@ -99,11 +109,11 @@ impl Rgsw {
         ct0: &RgswCiphertext,
         ct1: &RlweCiphertext,
     ) -> RlweCiphertext {
-        let ct1 = chain![[ct1.a(), ct1.b()]]
+        let ct1_limbs = chain![[ct1.a(), ct1.b()]]
             .flat_map(|v| param.decomposor.decompose(v))
             .collect::<AVec<_>>();
-        let a = ct1.dot(ct0.0.iter().map(|ct| ct.a()));
-        let b = ct1.dot(ct0.0.iter().map(|ct| ct.b()));
+        let a = ct0.a().dot(&ct1_limbs);
+        let b = ct0.b().dot(&ct1_limbs);
         RlweCiphertext(a, b)
     }
 }

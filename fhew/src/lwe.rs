@@ -1,4 +1,5 @@
-use crate::util::{dg, zo, AVec, Dot, Fq};
+use crate::util::{dg, zo, AVec, Decomposor, Dot, Fq};
+use itertools::chain;
 use rand::RngCore;
 
 pub struct Lwe;
@@ -8,13 +9,24 @@ pub struct LweParam {
     log_q: usize,
     log_p: usize,
     n: usize,
+    decomposor: Option<Decomposor>,
 }
 
 impl LweParam {
     pub fn new(log_q: usize, log_p: usize, n: usize) -> Self {
         assert!(log_q > log_p);
 
-        Self { log_q, log_p, n }
+        Self {
+            log_q,
+            log_p,
+            n,
+            decomposor: None,
+        }
+    }
+
+    pub fn with_decomposor(mut self, log_b: usize, k: usize) -> Self {
+        self.decomposor = Some(Decomposor::new(self.q(), log_b, k));
+        self
     }
 
     pub fn q(&self) -> u64 {
@@ -36,6 +48,18 @@ impl LweParam {
 
 pub struct LweSecretKey(AVec<Fq>);
 
+pub struct LweKeySwitchingKey(AVec<LweCiphertext>);
+
+impl LweKeySwitchingKey {
+    pub fn a(&self) -> impl Iterator<Item = &AVec<Fq>> {
+        self.0.iter().map(|ct| ct.a())
+    }
+
+    pub fn b(&self) -> impl Iterator<Item = &Fq> {
+        self.0.iter().map(|ct| ct.b())
+    }
+}
+
 pub struct LwePlaintext(Fq);
 
 pub struct LweCiphertext(AVec<Fq>, Fq);
@@ -44,8 +68,9 @@ impl LweCiphertext {
     pub fn a(&self) -> &AVec<Fq> {
         &self.0
     }
-    pub fn b(&self) -> Fq {
-        self.1
+
+    pub fn b(&self) -> &Fq {
+        &self.1
     }
 }
 
@@ -53,6 +78,20 @@ impl Lwe {
     pub fn key_gen(param: &LweParam, rng: &mut impl RngCore) -> LweSecretKey {
         let sk = AVec::sample_fq_from_i8(param.n, param.q(), &zo(0.5), rng);
         LweSecretKey(sk)
+    }
+
+    pub fn ksk_gen(
+        param: &LweParam,
+        sk0: &LweSecretKey,
+        sk1: &LweSecretKey,
+        rng: &mut impl RngCore,
+    ) -> LweKeySwitchingKey {
+        let decomposor = param.decomposor.as_ref().unwrap();
+        let ksk = chain![&sk1.0]
+            .flat_map(|sk1i| decomposor.bases().map(move |bi| -sk1i * bi))
+            .map(|m| Lwe::encrypt(param, sk0, &LwePlaintext(m), rng))
+            .collect();
+        LweKeySwitchingKey(ksk)
     }
 
     pub fn encode(param: &LweParam, m: &Fq) -> LwePlaintext {
@@ -87,6 +126,20 @@ impl Lwe {
 
     pub fn eval_sub(_: &LweParam, ct0: &LweCiphertext, ct1: &LweCiphertext) -> LweCiphertext {
         LweCiphertext(ct0.a() - ct1.a(), ct0.b() - ct1.b())
+    }
+
+    pub fn key_switch(
+        param: &LweParam,
+        ksk: &LweKeySwitchingKey,
+        ct: &LweCiphertext,
+    ) -> LweCiphertext {
+        let decomposor = param.decomposor.as_ref().unwrap();
+        let ct_a_limbs = chain![ct.a()]
+            .flat_map(|a| decomposor.decompose(a))
+            .collect::<AVec<_>>();
+        let a = ksk.a().dot(&ct_a_limbs);
+        let b = ksk.b().dot(&ct_a_limbs) + ct.b();
+        LweCiphertext(a, b)
     }
 }
 
@@ -142,6 +195,24 @@ mod test {
             let ct2 = Lwe::eval_sub(&param, &ct0, &ct1);
             let m2 = m0 - m1;
             assert_eq!(m2, Lwe::decode(&param, &Lwe::decrypt(&param, &sk, &ct2)));
+        }
+    }
+
+    #[test]
+    fn key_switch() {
+        let mut rng = StdRng::from_entropy();
+        let (log_q, log_p) = (16, 4);
+        let param0 = LweParam::new(log_q, log_p, 1024);
+        let param1 = LweParam::new(log_q, log_p, 512).with_decomposor(2, 8);
+        let sk0 = Lwe::key_gen(&param0, &mut rng);
+        let sk1 = Lwe::key_gen(&param1, &mut rng);
+        let ksk = Lwe::ksk_gen(&param1, &sk1, &sk0, &mut rng);
+        for m in 0..param0.p() {
+            let m = Fq::from_u64(param0.p(), m);
+            let pt = Lwe::encode(&param0, &m);
+            let ct0 = Lwe::encrypt(&param0, &sk0, &pt, &mut rng);
+            let ct1 = Lwe::key_switch(&param1, &ksk, &ct0);
+            assert_eq!(m, Lwe::decode(&param1, &Lwe::decrypt(&param1, &sk1, &ct1)));
         }
     }
 }

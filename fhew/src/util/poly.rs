@@ -87,6 +87,12 @@ impl<'a, T: Clone> From<&'a [T]> for Poly<T> {
     }
 }
 
+impl<T> Extend<T> for Poly<T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        self.0.extend(iter)
+    }
+}
+
 impl<T> FromIterator<T> for Poly<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self(iter.into_iter().collect())
