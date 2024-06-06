@@ -11,6 +11,12 @@ pub struct LweParam {
 }
 
 impl LweParam {
+    pub fn new(log_q: usize, log_p: usize, n: usize) -> Self {
+        assert!(log_q > log_p);
+
+        Self { log_q, log_p, n }
+    }
+
     pub fn q(&self) -> u64 {
         1 << self.log_q
     }
@@ -44,10 +50,6 @@ impl LweCiphertext {
 }
 
 impl Lwe {
-    pub fn param_gen(log_q: usize, log_p: usize, n: usize) -> LweParam {
-        LweParam { log_q, log_p, n }
-    }
-
     pub fn key_gen(param: &LweParam, rng: &mut impl RngCore) -> LweSecretKey {
         let sk = AVec::sample_fq_from_i8(param.n, param.q(), &zo(0.5), rng);
         LweSecretKey(sk)
@@ -90,7 +92,10 @@ impl Lwe {
 
 #[cfg(test)]
 mod test {
-    use crate::{lwe::Lwe, util::Fq};
+    use crate::{
+        lwe::{Lwe, LweParam},
+        util::Fq,
+    };
     use itertools::Itertools;
     use rand::{rngs::StdRng, SeedableRng};
 
@@ -98,7 +103,7 @@ mod test {
     fn encrypt_decrypt() {
         let mut rng = StdRng::from_entropy();
         let (log_q, log_p, n) = (16, 4, 1024);
-        let param = Lwe::param_gen(log_q, log_p, n);
+        let param = LweParam::new(log_q, log_p, n);
         let sk = Lwe::key_gen(&param, &mut rng);
         for m in 0..param.p() {
             let m = Fq::from_u64(param.p(), m);
@@ -112,7 +117,7 @@ mod test {
     fn eval_add() {
         let mut rng = StdRng::from_entropy();
         let (log_q, log_p, n) = (16, 4, 1024);
-        let param = Lwe::param_gen(log_q, log_p, n);
+        let param = LweParam::new(log_q, log_p, n);
         let sk = Lwe::key_gen(&param, &mut rng);
         for (m0, m1) in (0..param.p()).cartesian_product(0..param.p()) {
             let [m0, m1] = [m0, m1].map(|m| Fq::from_u64(param.p(), m));
@@ -128,7 +133,7 @@ mod test {
     fn eval_sub() {
         let mut rng = StdRng::from_entropy();
         let (log_q, log_p, n) = (16, 4, 1024);
-        let param = Lwe::param_gen(log_q, log_p, n);
+        let param = LweParam::new(log_q, log_p, n);
         let sk = Lwe::key_gen(&param, &mut rng);
         for (m0, m1) in (0..param.p()).cartesian_product(0..param.p()) {
             let [m0, m1] = [m0, m1].map(|m| Fq::from_u64(param.p(), m));

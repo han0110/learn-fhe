@@ -11,6 +11,13 @@ pub struct RlweParam {
 }
 
 impl RlweParam {
+    pub fn new(q: u64, p: u64, n: usize) -> Self {
+        assert!(q > p);
+        assert!(n.is_power_of_two());
+
+        Self { q, p, n }
+    }
+
     pub fn q(&self) -> u64 {
         self.q
     }
@@ -57,10 +64,6 @@ impl RlweCiphertext {
 }
 
 impl Rlwe {
-    pub fn param_gen(q: u64, p: u64, n: usize) -> RlweParam {
-        RlweParam { q, p, n }
-    }
-
     pub fn key_gen(param: &RlweParam, rng: &mut impl RngCore) -> (RlweSecretKey, RlwePublicKey) {
         let sk = RlweSecretKey(Poly::sample_fq_from_i8(param.n(), param.q(), &zo(0.5), rng));
         let pk = {
@@ -116,7 +119,7 @@ impl Rlwe {
 #[cfg(test)]
 mod test {
     use crate::{
-        rlwe::Rlwe,
+        rlwe::{Rlwe, RlweParam},
         util::{two_adic_primes, Poly},
     };
     use core::array::from_fn;
@@ -129,7 +132,7 @@ mod test {
         for log_n in 0..10 {
             let (n, p) = (1 << log_n, 1 << log_p);
             for q in two_adic_primes(log_q, log_n + 1).take(10) {
-                let param = Rlwe::param_gen(q, p, n);
+                let param = RlweParam::new(q, p, n);
                 let (sk, pk) = Rlwe::key_gen(&param, &mut rng);
                 let m = Poly::sample_fq_uniform(n, p, &mut rng);
                 let pt = Rlwe::encode(&param, &m);
@@ -146,7 +149,7 @@ mod test {
         for log_n in 0..10 {
             let (n, p) = (1 << log_n, 1 << log_p);
             for q in two_adic_primes(log_q, log_n + 1).take(10) {
-                let param = Rlwe::param_gen(q, p, n);
+                let param = RlweParam::new(q, p, n);
                 let (sk, pk) = Rlwe::key_gen(&param, &mut rng);
                 let [m0, m1] = &from_fn(|_| Poly::sample_fq_uniform(n, p, &mut rng));
                 let [pt0, pt1] = [m0, m1].map(|m| Rlwe::encode(&param, m));
@@ -165,7 +168,7 @@ mod test {
         for log_n in 0..10 {
             let (n, p) = (1 << log_n, 1 << log_p);
             for q in two_adic_primes(log_q, log_n + 1).take(10) {
-                let param = Rlwe::param_gen(q, p, n);
+                let param = RlweParam::new(q, p, n);
                 let (sk, pk) = Rlwe::key_gen(&param, &mut rng);
                 let [m0, m1] = &from_fn(|_| Poly::sample_fq_uniform(n, p, &mut rng));
                 let [pt0, pt1] = [m0, m1].map(|m| Rlwe::encode(&param, m));

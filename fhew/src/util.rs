@@ -2,10 +2,12 @@ use rand_distr::{Distribution, Standard, WeightedIndex};
 use std::f64::consts::SQRT_2;
 
 mod avec;
+mod decompose;
 mod fq;
 mod poly;
 
 pub use avec::AVec;
+pub use decompose::{Decomposable, Decomposor};
 pub use fq::{two_adic_primes, Fq};
 pub use poly::Poly;
 

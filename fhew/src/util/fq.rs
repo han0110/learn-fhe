@@ -82,16 +82,6 @@ impl Fq {
         (self.v != 0)
             .then(move || Self::from_i64(self.q, (self.v as i64).extended_gcd(&(self.q as i64)).x))
     }
-
-    pub fn round_shr(mut self, bits: usize) -> Self {
-        self.v = ((self.v + ((1 << bits) >> 1)) % self.q) >> bits;
-        self
-    }
-
-    pub fn decompose(self, log_b: usize, k: usize) -> impl Iterator<Item = Self> {
-        assert_eq!(self.v >> (log_b * k), 0);
-        (0..k).map(move |i| Self::from_u64(self.q, (self.v >> (log_b * i)) & ((1 << log_b) - 1)))
-    }
 }
 
 impl From<Fq> for u64 {
@@ -142,6 +132,14 @@ impl Neg for Fq {
     }
 }
 
+impl AddAssign<&u64> for Fq {
+    #[inline(always)]
+    fn add_assign(&mut self, rhs: &u64) {
+        assert!(*rhs < self.q);
+        *self += Self::from_u64(self.q, *rhs);
+    }
+}
+
 impl AddAssign<&Fq> for Fq {
     #[inline(always)]
     fn add_assign(&mut self, rhs: &Fq) {
@@ -158,11 +156,27 @@ impl SubAssign<&Fq> for Fq {
     }
 }
 
+impl SubAssign<&u64> for Fq {
+    #[inline(always)]
+    fn sub_assign(&mut self, rhs: &u64) {
+        assert!(*rhs < self.q);
+        *self -= Self::from_u64(self.q, *rhs);
+    }
+}
+
 impl MulAssign<&Fq> for Fq {
     #[inline(always)]
     fn mul_assign(&mut self, rhs: &Fq) {
         assert_eq!(self.q, rhs.q);
         *self = Self::from_u128(self.q, self.v as u128 * rhs.v as u128);
+    }
+}
+
+impl MulAssign<&u64> for Fq {
+    #[inline(always)]
+    fn mul_assign(&mut self, rhs: &u64) {
+        assert!(*rhs < self.q);
+        *self *= Self::from_u64(self.q, *rhs);
     }
 }
 
@@ -217,6 +231,9 @@ impl_ops!(
     impl Add<Fq> for Fq,
     impl Sub<Fq> for Fq,
     impl Mul<Fq> for Fq,
+    impl Add<u64> for Fq,
+    impl Sub<u64> for Fq,
+    impl Mul<u64> for Fq,
 );
 
 pub(crate) static NEG_NTT_PSI: OnceLock<Mutex<HashMap<u64, [Vec<Fq>; 2]>>> = OnceLock::new();

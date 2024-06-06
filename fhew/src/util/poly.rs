@@ -47,14 +47,6 @@ impl Poly<Fq> {
         assert!(n.is_power_of_two());
         Self(AVec::sample_fq_from_i8(n, q, dist, rng))
     }
-
-    pub fn round_shr(&self, bits: usize) -> Self {
-        Self(self.0.round_shr(bits))
-    }
-
-    pub fn decompose(&self, log_b: usize, k: usize) -> impl Iterator<Item = Self> {
-        self.0.decompose(log_b, k).map(Self)
-    }
 }
 
 impl<T> Deref for Poly<T> {

@@ -1,6 +1,6 @@
 use crate::{
     rlwe::{Rlwe, RlweCiphertext, RlweParam, RlwePlaintext, RlwePublicKey, RlweSecretKey},
-    util::{AVec, Dot, Fq, Poly},
+    util::{AVec, Decomposable, Decomposor, Dot, Fq, Poly},
 };
 use core::{iter::repeat_with, ops::Deref};
 use itertools::{chain, izip, Itertools};
@@ -11,8 +11,7 @@ pub struct Rgsw;
 #[derive(Clone, Copy, Debug)]
 pub struct RgswParam {
     rlwe: RlweParam,
-    log_b: usize,
-    k: usize,
+    decomposor: Decomposor,
 }
 
 impl Deref for RgswParam {
@@ -24,17 +23,9 @@ impl Deref for RgswParam {
 }
 
 impl RgswParam {
-    pub fn round_bits(&self) -> usize {
-        let log_q_ceil = self.q().next_power_of_two().ilog2() as usize;
-        log_q_ceil.saturating_sub(self.log_b * self.k)
-    }
-
-    pub fn log_bs(&self) -> impl Iterator<Item = usize> {
-        (self.round_bits()..).step_by(self.log_b).take(self.k)
-    }
-
-    pub fn bs(&self) -> impl Iterator<Item = Fq> + '_ {
-        self.log_bs().map(|bits| Fq::from_u64(self.q(), 1 << bits))
+    pub fn new(rlwe: RlweParam, log_b: usize, k: usize) -> Self {
+        let decomposor = Decomposor::new(rlwe.q(), log_b, k);
+        Self { rlwe, decomposor }
     }
 }
 
@@ -42,15 +33,11 @@ pub type RgswSecretKey = RlweSecretKey;
 
 pub type RgswPublicKey = RlwePublicKey;
 
-pub type RgswPlaintext = RlwePlaintext;
+pub struct RgswPlaintext(Poly<Fq>);
 
 pub struct RgswCiphertext(Vec<RlweCiphertext>);
 
 impl Rgsw {
-    pub fn param_gen(rlwe: RlweParam, log_b: usize, k: usize) -> RgswParam {
-        RgswParam { rlwe, log_b, k }
-    }
-
     pub fn key_gen(param: &RgswParam, rng: &mut impl RngCore) -> (RgswSecretKey, RgswPublicKey) {
         Rlwe::key_gen(param, rng)
     }
@@ -60,7 +47,7 @@ impl Rgsw {
         assert!(m.iter().all(|m| m.q() == param.p()));
 
         let to_fq = |m: &Fq| Fq::from_u64(param.q(), m.into());
-        RlwePlaintext(m.iter().map(to_fq).collect())
+        RgswPlaintext(m.iter().map(to_fq).collect())
     }
 
     pub fn decode(param: &RgswParam, pt: &RgswPlaintext) -> Poly<Fq> {
@@ -76,16 +63,17 @@ impl Rgsw {
     ) -> RgswCiphertext {
         let zero = RlwePlaintext(Poly::zero(param.n(), param.q()));
         let mut cts = repeat_with(|| Rlwe::encrypt(param, pk, &zero, rng))
-            .take(2 * param.k)
+            .take(2 * param.decomposor.k())
             .collect_vec();
-        izip!(&mut cts[..param.k], param.bs()).for_each(|(ct, bi)| ct.0 += &pt.0 * bi);
-        izip!(&mut cts[param.k..], param.bs()).for_each(|(ct, bi)| ct.1 += &pt.0 * bi);
+        let (c0, c1) = cts.split_at_mut(param.decomposor.k());
+        izip!(c0, param.decomposor.bases()).for_each(|(ct, bi)| ct.0 += &pt.0 * bi);
+        izip!(c1, param.decomposor.bases()).for_each(|(ct, bi)| ct.1 += &pt.0 * bi);
         RgswCiphertext(cts)
     }
 
     pub fn decrypt(param: &RgswParam, sk: &RgswSecretKey, ct: &RgswCiphertext) -> RgswPlaintext {
         let pt = Rlwe::decrypt(param, sk, ct.0.last().unwrap());
-        RlwePlaintext(pt.0.round_shr(param.log_bs().last().unwrap()))
+        RgswPlaintext(pt.0.rounding_shr(param.decomposor.log_bases().last().unwrap()))
     }
 
     pub fn eval_add(
@@ -112,8 +100,7 @@ impl Rgsw {
         ct1: &RlweCiphertext,
     ) -> RlweCiphertext {
         let ct1 = chain![[ct1.a(), ct1.b()]]
-            .map(|v| v.round_shr(param.round_bits()))
-            .flat_map(|v| v.decompose(param.log_b, param.k))
+            .flat_map(|v| param.decomposor.decompose(v))
             .collect::<AVec<_>>();
         let a = ct1.dot(ct0.0.iter().map(|ct| ct.a()));
         let b = ct1.dot(ct0.0.iter().map(|ct| ct.b()));
@@ -124,8 +111,8 @@ impl Rgsw {
 #[cfg(test)]
 mod test {
     use crate::{
-        rgsw::Rgsw,
-        rlwe::Rlwe,
+        rgsw::{Rgsw, RgswParam},
+        rlwe::{Rlwe, RlweParam},
         util::{two_adic_primes, Poly},
     };
     use core::array::from_fn;
@@ -138,7 +125,7 @@ mod test {
         for log_n in 0..10 {
             let (n, p) = (1 << log_n, 1 << log_p);
             for q in two_adic_primes(log_q, log_n + 1).take(10) {
-                let param = Rgsw::param_gen(Rlwe::param_gen(q, p, n), log_b, k);
+                let param = RgswParam::new(RlweParam::new(q, p, n), log_b, k);
                 let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
                 let m = Poly::sample_fq_uniform(n, p, &mut rng);
                 let pt = Rgsw::encode(&param, &m);
@@ -155,7 +142,7 @@ mod test {
         for log_n in 0..10 {
             let (n, p) = (1 << log_n, 1 << log_p);
             for q in two_adic_primes(log_q, log_n + 1).take(10) {
-                let param = Rgsw::param_gen(Rlwe::param_gen(q, p, n), log_b, k);
+                let param = RgswParam::new(RlweParam::new(q, p, n), log_b, k);
                 let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
                 let [m0, m1] = &from_fn(|_| Poly::sample_fq_uniform(n, p, &mut rng));
                 let [pt0, pt1] = [m0, m1].map(|m| Rgsw::encode(&param, m));
@@ -174,7 +161,7 @@ mod test {
         for log_n in 0..10 {
             let (n, p) = (1 << log_n, 1 << log_p);
             for q in two_adic_primes(log_q, log_n + 1).take(10) {
-                let param = Rgsw::param_gen(Rlwe::param_gen(q, p, n), log_b, k);
+                let param = RgswParam::new(RlweParam::new(q, p, n), log_b, k);
                 let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
                 let [m0, m1] = &from_fn(|_| Poly::sample_fq_uniform(n, p, &mut rng));
                 let [pt0, pt1] = [m0, m1].map(|m| Rgsw::encode(&param, m));
@@ -193,7 +180,7 @@ mod test {
         for log_n in 0..10 {
             let (n, p) = (1 << log_n, 1 << log_p);
             for q in two_adic_primes(log_q, log_n + 1).take(10) {
-                let param = Rgsw::param_gen(Rlwe::param_gen(q, p, n), log_b, k);
+                let param = RgswParam::new(RlweParam::new(q, p, n), log_b, k);
                 let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
                 let [m0, m1] = &from_fn(|_| Poly::sample_fq_uniform(n, p, &mut rng));
                 let ct0 = Rgsw::encrypt(&param, &pk, &Rgsw::encode(&param, m0), &mut rng);
