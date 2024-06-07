@@ -1,7 +1,11 @@
-use crate::util::{dg, zo, AVec, Decomposor, Dot, Fq};
+use crate::{
+    rlwe::RlweSecretKey,
+    util::{dg, zo, AVec, Decomposor, Dot, Fq},
+};
 use itertools::chain;
 use rand::RngCore;
 
+#[derive(Debug)]
 pub struct Lwe;
 
 #[derive(Clone, Copy, Debug)]
@@ -44,10 +48,22 @@ impl LweParam {
     pub fn delta(&self) -> f64 {
         self.q as f64 / self.p as f64
     }
+
+    pub fn decomposor(&self) -> &Decomposor {
+        self.decomposor.as_ref().unwrap()
+    }
 }
 
+#[derive(Debug)]
 pub struct LweSecretKey(pub(crate) AVec<i8>);
 
+impl From<RlweSecretKey> for LweSecretKey {
+    fn from(value: RlweSecretKey) -> Self {
+        LweSecretKey(value.0.into())
+    }
+}
+
+#[derive(Debug)]
 pub struct LweKeySwitchingKey(Vec<LweCiphertext>);
 
 impl LweKeySwitchingKey {
@@ -60,9 +76,11 @@ impl LweKeySwitchingKey {
     }
 }
 
+#[derive(Debug)]
 pub struct LwePlaintext(Fq);
 
-pub struct LweCiphertext(AVec<Fq>, Fq);
+#[derive(Debug)]
+pub struct LweCiphertext(pub(crate) AVec<Fq>, pub(crate) Fq);
 
 impl LweCiphertext {
     pub fn a(&self) -> &AVec<Fq> {
@@ -71,6 +89,17 @@ impl LweCiphertext {
 
     pub fn b(&self) -> &Fq {
         &self.1
+    }
+
+    pub fn mod_switch(&self, q_prime: u64) -> Self {
+        Self(self.a().mod_switch(q_prime), self.b().mod_switch(q_prime))
+    }
+
+    pub fn mod_switch_odd(&self, q_prime: u64) -> Self {
+        Self(
+            self.a().mod_switch_odd(q_prime),
+            self.b().mod_switch_odd(q_prime),
+        )
     }
 }
 
@@ -86,9 +115,8 @@ impl Lwe {
         sk1: &LweSecretKey,
         rng: &mut impl RngCore,
     ) -> LweKeySwitchingKey {
-        let decomposor = param.decomposor.as_ref().unwrap();
         let ksk = chain![&sk1.0]
-            .flat_map(|sk1i| decomposor.bases().map(move |bi| -bi * sk1i))
+            .flat_map(|sk1i| param.decomposor().bases().map(move |bi| -bi * sk1i))
             .map(|m| Lwe::sk_encrypt(param, sk0, &LwePlaintext(m), rng))
             .collect();
         LweKeySwitchingKey(ksk)
@@ -133,9 +161,8 @@ impl Lwe {
         ksk: &LweKeySwitchingKey,
         ct: &LweCiphertext,
     ) -> LweCiphertext {
-        let decomposor = param.decomposor.as_ref().unwrap();
         let ct_a_limbs = chain![ct.a()]
-            .flat_map(|a| decomposor.decompose(a))
+            .flat_map(|a| param.decomposor().decompose(a))
             .collect::<AVec<_>>();
         let a = ksk.a().dot(&ct_a_limbs);
         let b = ksk.b().dot(&ct_a_limbs) + ct.b();

@@ -1,58 +1,49 @@
-use crate::util::{dg, zo, AVec, Decomposor, Dot, Fq, Poly};
+use crate::{
+    lwe::{LweCiphertext, LweParam, LweSecretKey},
+    util::{dg, zo, AVec, Dot, Fq, Poly},
+};
 use core::ops::Deref;
 use itertools::chain;
 use rand::RngCore;
 
+#[derive(Debug)]
 pub struct Rlwe;
 
 #[derive(Clone, Copy, Debug)]
-pub struct RlweParam {
-    q: u64,
-    p: u64,
-    log_n: usize,
-    decomposor: Option<Decomposor>,
+pub struct RlweParam(LweParam);
+
+impl Deref for RlweParam {
+    type Target = LweParam;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 impl RlweParam {
     pub fn new(q: u64, p: u64, log_n: usize) -> Self {
-        assert!(q > p);
-
-        Self {
-            q,
-            p,
-            log_n,
-            decomposor: None,
-        }
+        Self(LweParam::new(q, p, 1 << log_n))
     }
 
-    pub fn with_decomposor(mut self, log_b: usize, k: usize) -> Self {
-        self.decomposor = Some(Decomposor::new(self.q(), log_b, k));
-        self
-    }
-
-    pub fn q(&self) -> u64 {
-        self.q
-    }
-
-    pub fn p(&self) -> u64 {
-        self.p
+    pub fn with_decomposor(self, log_b: usize, k: usize) -> Self {
+        Self(self.0.with_decomposor(log_b, k))
     }
 
     pub fn log_n(&self) -> usize {
-        self.log_n
-    }
-
-    pub fn n(&self) -> usize {
-        1 << self.log_n
-    }
-
-    pub fn delta(&self) -> f64 {
-        self.q as f64 / self.p as f64
+        self.n().ilog2() as usize
     }
 }
 
+#[derive(Debug)]
 pub struct RlweSecretKey(pub(crate) Poly<i8>);
 
+impl From<LweSecretKey> for RlweSecretKey {
+    fn from(value: LweSecretKey) -> Self {
+        RlweSecretKey(value.0.into())
+    }
+}
+
+#[derive(Debug)]
 pub struct RlwePublicKey(Poly<Fq>, Poly<Fq>);
 
 impl RlwePublicKey {
@@ -65,6 +56,7 @@ impl RlwePublicKey {
     }
 }
 
+#[derive(Debug)]
 pub struct RlweKeySwitchingKey(Vec<RlweCiphertext>);
 
 impl RlweKeySwitchingKey {
@@ -77,6 +69,7 @@ impl RlweKeySwitchingKey {
     }
 }
 
+#[derive(Debug)]
 pub struct RlweAutoKey(i64, RlweKeySwitchingKey);
 
 impl Deref for RlweAutoKey {
@@ -93,8 +86,10 @@ impl RlweAutoKey {
     }
 }
 
+#[derive(Debug)]
 pub struct RlwePlaintext(pub(crate) Poly<Fq>);
 
+#[derive(Debug)]
 pub struct RlweCiphertext(pub(crate) Poly<Fq>, pub(crate) Poly<Fq>);
 
 impl RlweCiphertext {
@@ -131,8 +126,7 @@ impl Rlwe {
         sk1: &RlweSecretKey,
         rng: &mut impl RngCore,
     ) -> RlweKeySwitchingKey {
-        let decomposor = param.decomposor.as_ref().unwrap();
-        let ksk = chain![decomposor.bases()]
+        let ksk = chain![param.decomposor().bases()]
             .map(move |bi| -&sk1.0 * bi)
             .map(|m| Rlwe::sk_encrypt(param, sk0, &RlwePlaintext(m), rng))
             .collect();
@@ -207,8 +201,7 @@ impl Rlwe {
         ksk: &RlweKeySwitchingKey,
         ct: &RlweCiphertext,
     ) -> RlweCiphertext {
-        let decomposor = param.decomposor.as_ref().unwrap();
-        let ct_a_limbs = decomposor.decompose(ct.a()).collect::<AVec<_>>();
+        let ct_a_limbs = param.decomposor().decompose(ct.a()).collect::<AVec<_>>();
         let a = ksk.a().dot(&ct_a_limbs);
         let b = ksk.b().dot(&ct_a_limbs) + ct.b();
         RlweCiphertext(a, b)
@@ -222,11 +215,23 @@ impl Rlwe {
         let ct_auto = ct.automorphism(ak.t());
         Rlwe::key_switch(param, ak, &ct_auto)
     }
+
+    pub fn sample_extract(param: &RlweParam, ct: &RlweCiphertext, i: usize) -> LweCiphertext {
+        assert!(i < param.n());
+        let a = chain![
+            ct.a()[..i + 1].iter().rev().copied(),
+            ct.a()[i + 1..].iter().rev().map(|v| -v)
+        ]
+        .collect();
+        let b = ct.b()[i];
+        LweCiphertext(a, b)
+    }
 }
 
 #[cfg(test)]
 pub(crate) mod test {
     use crate::{
+        lwe::Lwe,
         rlwe::{Rlwe, RlweParam},
         util::{two_adic_primes, Poly},
     };
@@ -327,6 +332,24 @@ pub(crate) mod test {
                     m.automorphism(ak.t()),
                     Rlwe::decode(&param, &Rlwe::decrypt(&param, &sk, &ct1))
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn sample_extract() {
+        let mut rng = StdRng::from_entropy();
+        let (log_n_range, log_q, p) = (0..10, 45, 1 << 4);
+        for (log_n, q) in testing_n_q(log_n_range, log_q) {
+            let param = RlweParam::new(q, p, log_n);
+            let (sk, pk) = Rlwe::key_gen(&param, &mut rng);
+            let sk = sk.into();
+            let m = Poly::sample_fq_uniform(param.n(), p, &mut rng);
+            let pt = Rlwe::encode(&param, &m);
+            let ct = Rlwe::pk_encrypt(&param, &pk, &pt, &mut rng);
+            for i in 0..param.n() {
+                let ct = Rlwe::sample_extract(&param, &ct, i);
+                assert_eq!(m[i], Lwe::decode(&param, &Lwe::decrypt(&param, &sk, &ct)));
             }
         }
     }

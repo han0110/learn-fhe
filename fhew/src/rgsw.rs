@@ -6,6 +6,7 @@ use core::{iter::repeat_with, ops::Deref};
 use itertools::{chain, izip, Either, Itertools};
 use rand::RngCore;
 
+#[derive(Debug)]
 pub struct Rgsw;
 
 #[derive(Clone, Copy, Debug)]
@@ -33,8 +34,10 @@ pub type RgswSecretKey = RlweSecretKey;
 
 pub type RgswPublicKey = RlwePublicKey;
 
+#[derive(Debug)]
 pub struct RgswPlaintext(pub(crate) Poly<Fq>);
 
+#[derive(Debug)]
 pub struct RgswCiphertext(Vec<RlweCiphertext>);
 
 impl RgswCiphertext {

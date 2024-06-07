@@ -130,6 +130,12 @@ impl<T: Clone> From<AVec<T>> for Poly<T> {
     }
 }
 
+impl<T> From<Poly<T>> for AVec<T> {
+    fn from(value: Poly<T>) -> Self {
+        value.0
+    }
+}
+
 impl<T> Extend<T> for Poly<T> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         self.0.extend(iter)
