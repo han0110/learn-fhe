@@ -27,18 +27,14 @@ impl Fq {
         self.q
     }
 
-    pub fn from_u64(q: u64, v: u64) -> Self {
-        let v = v % q;
-        Self { q, v }
-    }
-
     pub fn from_u128(q: u64, v: u128) -> Self {
         let v = (v % q as u128) as u64;
         Self { q, v }
     }
 
-    pub fn from_i8(q: u64, v: i8) -> Self {
-        Self::from_i64(q, v as i64)
+    pub fn from_u64(q: u64, v: u64) -> Self {
+        let v = v % q;
+        Self { q, v }
     }
 
     pub fn from_i64(q: u64, v: i64) -> Self {
@@ -48,6 +44,14 @@ impl Fq {
 
     pub fn from_f64(q: u64, v: f64) -> Self {
         Self::from_i64(q, v.round() as i64)
+    }
+
+    fn into_c64(self) -> i64 {
+        if self.v > self.q >> 1 {
+            self.v as i64 - self.q as i64
+        } else {
+            self.v as i64
+        }
     }
 
     pub fn sample_uniform(q: u64, rng: &mut impl RngCore) -> Self {
@@ -96,15 +100,27 @@ impl From<&Fq> for u64 {
     }
 }
 
+impl From<Fq> for i64 {
+    fn from(value: Fq) -> Self {
+        value.into_c64()
+    }
+}
+
+impl From<&Fq> for i64 {
+    fn from(value: &Fq) -> Self {
+        value.into_c64()
+    }
+}
+
 impl From<Fq> for f64 {
     fn from(value: Fq) -> Self {
-        value.v as f64
+        value.into_c64() as f64
     }
 }
 
 impl From<&Fq> for f64 {
     fn from(value: &Fq) -> Self {
-        value.v as f64
+        value.into_c64() as f64
     }
 }
 
@@ -132,14 +148,6 @@ impl Neg for Fq {
     }
 }
 
-impl AddAssign<&u64> for Fq {
-    #[inline(always)]
-    fn add_assign(&mut self, rhs: &u64) {
-        assert!(*rhs < self.q);
-        *self += Self::from_u64(self.q, *rhs);
-    }
-}
-
 impl AddAssign<&Fq> for Fq {
     #[inline(always)]
     fn add_assign(&mut self, rhs: &Fq) {
@@ -156,27 +164,11 @@ impl SubAssign<&Fq> for Fq {
     }
 }
 
-impl SubAssign<&u64> for Fq {
-    #[inline(always)]
-    fn sub_assign(&mut self, rhs: &u64) {
-        assert!(*rhs < self.q);
-        *self -= Self::from_u64(self.q, *rhs);
-    }
-}
-
 impl MulAssign<&Fq> for Fq {
     #[inline(always)]
     fn mul_assign(&mut self, rhs: &Fq) {
         assert_eq!(self.q, rhs.q);
         *self = Self::from_u128(self.q, self.v as u128 * rhs.v as u128);
-    }
-}
-
-impl MulAssign<&u64> for Fq {
-    #[inline(always)]
-    fn mul_assign(&mut self, rhs: &u64) {
-        assert!(*rhs < self.q);
-        *self *= Self::from_u64(self.q, *rhs);
     }
 }
 
@@ -231,12 +223,54 @@ impl_ops!(
     impl Add<Fq> for Fq,
     impl Sub<Fq> for Fq,
     impl Mul<Fq> for Fq,
-    impl Add<u64> for Fq,
-    impl Sub<u64> for Fq,
-    impl Mul<u64> for Fq,
 );
 
-pub(crate) static NEG_NTT_PSI: OnceLock<Mutex<HashMap<u64, [Vec<Fq>; 2]>>> = OnceLock::new();
+macro_rules! impl_ops_with_primitive {
+    (@ impl $trait:ident<&$p:ty> for Fq) => {
+        paste::paste! {
+            impl core::ops::$trait<&$p> for Fq {
+                #[inline(always)]
+                fn [<$trait:snake:lower>](&mut self, rhs: &$p) {
+                    self.[<$trait:snake:lower>](Self::[<from_ $p>](self.q, *rhs));
+                }
+            }
+        }
+    };
+    ($(impl $trait:ident<&$p:ty> for Fq),* $(,)?) => {
+        $(
+            impl_ops_with_primitive!(@ impl $trait<&$p> for Fq);
+        )*
+    };
+    ($($p1:ty $(as $p2:ty)?),* $(,)?) => {
+        $(
+            $(
+                paste::paste! {
+                    impl Fq {
+                        pub fn [<from_ $p1>](q: u64, v: $p1) -> Self {
+                            Self::[<from_ $p2>](q, v as $p2)
+                        }
+                    }
+                }
+            )?
+            impl_ops_with_primitive!(
+                impl AddAssign<&$p1> for Fq,
+                impl SubAssign<&$p1> for Fq,
+                impl MulAssign<&$p1> for Fq,
+            );
+            impl_ops!(
+                impl Add<$p1> for Fq,
+                impl Sub<$p1> for Fq,
+                impl Mul<$p1> for Fq,
+            );
+        )*
+    };
+}
+
+impl_ops_with_primitive!(
+    u64, i64, u32 as u64, i32 as i64, u16 as u64, i16 as i64, u8 as u64, i8 as i64
+);
+
+pub static NEG_NTT_PSI: OnceLock<Mutex<HashMap<u64, [Vec<Fq>; 2]>>> = OnceLock::new();
 
 pub fn two_adic_primes(bits: usize, log_n: usize) -> impl Iterator<Item = u64> {
     assert!(bits > log_n);

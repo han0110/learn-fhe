@@ -52,7 +52,7 @@ pub trait Decomposable: Sized {
 
 impl Decomposable for Fq {
     fn rounding_shr(&self, bits: usize) -> Self {
-        let rounded = self + ((1 << bits) >> 1);
+        let rounded = self + ((1u64 << bits) >> 1);
         Fq::from_u64(self.q(), u64::from(rounded) >> bits)
     }
 

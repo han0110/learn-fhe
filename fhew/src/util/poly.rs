@@ -6,7 +6,7 @@ use core::{
     borrow::Borrow,
     fmt::{self, Display, Formatter},
     iter::Sum,
-    ops::{AddAssign, Deref, DerefMut, MulAssign, Neg, SubAssign},
+    ops::{AddAssign, BitXor, Deref, DerefMut, Mul, MulAssign, Neg, SubAssign},
     slice,
 };
 use itertools::izip;
@@ -18,19 +18,47 @@ use std::vec;
 pub struct Poly<T>(AVec<T>);
 
 impl<T> Poly<T> {
+    fn new(v: AVec<T>) -> Self {
+        assert!(v.len().is_power_of_two());
+        Self(v)
+    }
+
     pub fn n(&self) -> usize {
         self.len()
     }
 
     pub fn sample(n: usize, dist: &impl Distribution<T>, rng: &mut impl RngCore) -> Self {
-        Self(AVec::sample(n, dist, rng))
+        Self::new(AVec::sample(n, dist, rng))
+    }
+
+    pub fn automorphism(&self, t: i64) -> Self
+    where
+        T: Copy + Neg<Output = T>,
+    {
+        let mut poly = self.clone();
+        let n = self.n();
+        let t = t.rem_euclid(2 * n as i64) as usize;
+        (0..n).for_each(|i| {
+            let it = (i * t) % (2 * n);
+            if it < n {
+                poly[it] = self[i]
+            } else {
+                poly[it - n] = -self[i]
+            }
+        });
+        poly
     }
 }
 
 impl Poly<Fq> {
     pub fn zero(n: usize, q: u64) -> Self {
-        assert!(n.is_power_of_two());
-        Self(vec![Fq::from_u64(q, 0); n].into())
+        Self::new(vec![Fq::from_u64(q, 0); n].into())
+    }
+
+    pub fn one(n: usize, q: u64) -> Self {
+        let mut poly = Self::zero(n, q);
+        poly[0] += 1;
+        poly
     }
 
     pub fn monomial(n: usize, q: u64, i: i64) -> Self {
@@ -44,24 +72,8 @@ impl Poly<Fq> {
         poly
     }
 
-    pub fn automorphism(&self, t: i64) -> Self {
-        let mut poly = Self::zero(self.n(), self[0].q());
-        let n = self.n();
-        let t = t.rem_euclid(2 * n as i64) as usize;
-        (0..n).for_each(|i| {
-            let it = (i * t) % (2 * n);
-            if it < n {
-                poly[it] = self[i]
-            } else {
-                poly[it - n] = -self[i]
-            }
-        });
-        poly
-    }
-
     pub fn sample_fq_uniform(n: usize, q: u64, rng: &mut impl RngCore) -> Self {
-        assert!(n.is_power_of_two());
-        Self(AVec::sample_fq_uniform(n, q, rng))
+        Self::new(AVec::sample_fq_uniform(n, q, rng))
     }
 
     pub fn sample_fq_from_i8(
@@ -70,8 +82,7 @@ impl Poly<Fq> {
         dist: &impl Distribution<i8>,
         rng: &mut impl RngCore,
     ) -> Self {
-        assert!(n.is_power_of_two());
-        Self(AVec::sample_fq_from_i8(n, q, dist, rng))
+        Self::new(AVec::sample_fq_from_i8(n, q, dist, rng))
     }
 }
 
@@ -103,13 +114,19 @@ impl<T> From<Poly<T>> for Vec<T> {
 
 impl<T> From<Vec<T>> for Poly<T> {
     fn from(value: Vec<T>) -> Self {
-        Self(value.into())
+        Self::new(value.into())
     }
 }
 
 impl<'a, T: Clone> From<&'a [T]> for Poly<T> {
     fn from(value: &'a [T]) -> Self {
-        Self(value.into())
+        Self::new(value.into())
+    }
+}
+
+impl<T: Clone> From<AVec<T>> for Poly<T> {
+    fn from(value: AVec<T>) -> Self {
+        Self::new(value)
     }
 }
 
@@ -121,7 +138,7 @@ impl<T> Extend<T> for Poly<T> {
 
 impl<T> FromIterator<T> for Poly<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        Self(iter.into_iter().collect())
+        Self::new(iter.into_iter().collect())
     }
 }
 
@@ -209,7 +226,7 @@ impl MulAssign<&Poly<Fq>> for Poly<Fq> {
             .get_or_init(Default::default)
             .lock()
             .unwrap()
-            .get(&self.0[0].q())
+            .get(&self[0].q())
         {
             Some([psi, psi_inv]) if self.n() <= psi.len() => {
                 neg_ntt_mul_assign(self, rhs, psi, psi_inv)
@@ -219,9 +236,18 @@ impl MulAssign<&Poly<Fq>> for Poly<Fq> {
     }
 }
 
-impl MulAssign<Poly<Fq>> for Poly<Fq> {
-    fn mul_assign(&mut self, rhs: Poly<Fq>) {
-        *self *= &rhs;
+impl MulAssign<&Poly<i8>> for Poly<Fq> {
+    fn mul_assign(&mut self, rhs: &Poly<i8>) {
+        *self *= Self::from_iter(rhs.iter().map(|v| Fq::from_i8(self[0].q(), *v)));
+    }
+}
+
+impl Mul<&Fq> for &Poly<i8> {
+    type Output = Poly<Fq>;
+
+    fn mul(self, rhs: &Fq) -> Self::Output {
+        let q = rhs.q();
+        self.iter().map(|v| Fq::from_i8(q, *v) * rhs).collect()
     }
 }
 
@@ -243,7 +269,7 @@ impl_ops!(
 );
 
 macro_rules! impl_mul_ops {
-    (impl Mul<$rhs:ty> for $lhs:ty; $lhs_convert:expr) => {
+    (@ impl Mul<$rhs:ty> for $lhs:ty; $lhs_convert:expr) => {
         impl core::ops::Mul<$rhs> for $lhs {
             type Output = Poly<Fq>;
 
@@ -254,12 +280,70 @@ macro_rules! impl_mul_ops {
             }
         }
     };
+    ($(impl Mul<$rhs:ty> for $lhs:ty),* $(,)?) => {
+        $(
+            impl core::ops::MulAssign<$rhs> for $lhs {
+                fn mul_assign(&mut self, rhs: $rhs) {
+                    *self *= &rhs;
+                }
+            }
+            impl_mul_ops!(@ impl Mul<$rhs> for $lhs; core::convert::identity);
+            impl_mul_ops!(@ impl Mul<&$rhs> for $lhs; core::convert::identity);
+            impl_mul_ops!(@ impl Mul<$rhs> for &$lhs; <_>::clone);
+            impl_mul_ops!(@ impl Mul<&$rhs> for &$lhs; <_>::clone);
+        )*
+    }
 }
 
-impl_mul_ops!(impl Mul<Poly<Fq>> for Poly<Fq>; core::convert::identity);
-impl_mul_ops!(impl Mul<&Poly<Fq>> for Poly<Fq>; core::convert::identity);
-impl_mul_ops!(impl Mul<Poly<Fq>> for &Poly<Fq>; <_>::clone);
-impl_mul_ops!(impl Mul<&Poly<Fq>> for &Poly<Fq>; <_>::clone);
+impl_mul_ops!(
+    impl Mul<Poly<Fq>> for Poly<Fq>,
+    impl Mul<Poly<i8>> for Poly<Fq>,
+    impl Mul<Monomial> for Poly<Fq>,
+);
+
+macro_rules! impl_mul_ops_from_i8 {
+    (@ impl Mul<$rhs:ty> for $lhs:ty) => {
+        impl core::ops::Mul<$rhs> for $lhs {
+            type Output = Poly<Fq>;
+
+            fn mul(self, rhs: $rhs) -> Poly<Fq> {
+                self.borrow().mul(rhs.borrow())
+            }
+        }
+    };
+    ($rhs:ty) => {
+        impl_mul_ops_from_i8!(@ impl Mul<$rhs> for Poly<i8>);
+        impl_mul_ops_from_i8!(@ impl Mul<&$rhs> for Poly<i8>);
+        impl_mul_ops_from_i8!(@ impl Mul<$rhs> for &Poly<i8>);
+    }
+}
+
+impl_mul_ops_from_i8!(Fq);
+
+pub struct Monomial(i64);
+
+impl MulAssign<&Monomial> for Poly<Fq> {
+    fn mul_assign(&mut self, rhs: &Monomial) {
+        let n = self.n();
+        let i = rhs.0.rem_euclid(2 * n as i64) as usize;
+        self.rotate_right(i % n);
+        if i < n {
+            self[..i].iter_mut().for_each(|v| *v = -*v);
+        } else {
+            self[i - n..].iter_mut().for_each(|v| *v = -*v);
+        }
+    }
+}
+
+pub struct X;
+
+impl BitXor<&i8> for X {
+    type Output = Monomial;
+
+    fn bitxor(self, rhs: &i8) -> Self::Output {
+        Monomial(*rhs as i64)
+    }
+}
 
 fn neg_schoolbook_mul(a: &Poly<Fq>, b: &Poly<Fq>) -> Poly<Fq> {
     let n = a.len();

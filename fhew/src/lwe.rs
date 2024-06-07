@@ -6,19 +6,19 @@ pub struct Lwe;
 
 #[derive(Clone, Copy, Debug)]
 pub struct LweParam {
-    log_q: usize,
-    log_p: usize,
+    q: u64,
+    p: u64,
     n: usize,
     decomposor: Option<Decomposor>,
 }
 
 impl LweParam {
-    pub fn new(log_q: usize, log_p: usize, n: usize) -> Self {
-        assert!(log_q > log_p);
+    pub fn new(q: u64, p: u64, n: usize) -> Self {
+        assert!(q > p);
 
         Self {
-            log_q,
-            log_p,
+            q,
+            p,
             n,
             decomposor: None,
         }
@@ -30,23 +30,23 @@ impl LweParam {
     }
 
     pub fn q(&self) -> u64 {
-        1 << self.log_q
+        self.q
     }
 
     pub fn p(&self) -> u64 {
-        1 << self.log_p
+        self.p
     }
 
     pub fn n(&self) -> usize {
         self.n
     }
 
-    pub fn delta(&self) -> u64 {
-        1 << (self.log_q - self.log_p)
+    pub fn delta(&self) -> f64 {
+        self.q as f64 / self.p as f64
     }
 }
 
-pub struct LweSecretKey(AVec<Fq>);
+pub struct LweSecretKey(pub(crate) AVec<i8>);
 
 pub struct LweKeySwitchingKey(Vec<LweCiphertext>);
 
@@ -76,7 +76,7 @@ impl LweCiphertext {
 
 impl Lwe {
     pub fn key_gen(param: &LweParam, rng: &mut impl RngCore) -> LweSecretKey {
-        let sk = AVec::sample_fq_from_i8(param.n, param.q(), &zo(0.5), rng);
+        let sk = AVec::sample(param.n, &zo(0.5), rng);
         LweSecretKey(sk)
     }
 
@@ -88,7 +88,7 @@ impl Lwe {
     ) -> LweKeySwitchingKey {
         let decomposor = param.decomposor.as_ref().unwrap();
         let ksk = chain![&sk1.0]
-            .flat_map(|sk1i| decomposor.bases().map(move |bi| -sk1i * bi))
+            .flat_map(|sk1i| decomposor.bases().map(move |bi| -bi * sk1i))
             .map(|m| Lwe::sk_encrypt(param, sk0, &LwePlaintext(m), rng))
             .collect();
         LweKeySwitchingKey(ksk)
@@ -96,11 +96,11 @@ impl Lwe {
 
     pub fn encode(param: &LweParam, m: &Fq) -> LwePlaintext {
         assert_eq!(m.q(), param.p());
-        LwePlaintext(Fq::from_u64(param.q(), u64::from(m) * param.delta()))
+        LwePlaintext(Fq::from_f64(param.q(), f64::from(m) * param.delta()))
     }
 
     pub fn decode(param: &LweParam, pt: &LwePlaintext) -> Fq {
-        Fq::from_f64(param.p(), f64::from(pt.0) / param.delta() as f64)
+        Fq::from_f64(param.p(), f64::from(pt.0) / param.delta())
     }
 
     pub fn sk_encrypt(
@@ -155,8 +155,8 @@ mod test {
     #[test]
     fn encrypt_decrypt() {
         let mut rng = StdRng::from_entropy();
-        let (log_q, log_p, n) = (16, 4, 1024);
-        let param = LweParam::new(log_q, log_p, n);
+        let (q, p, n) = (1 << 16, 1 << 4, 1024);
+        let param = LweParam::new(q, p, n);
         let sk = Lwe::key_gen(&param, &mut rng);
         for m in 0..param.p() {
             let m = Fq::from_u64(param.p(), m);
@@ -169,8 +169,8 @@ mod test {
     #[test]
     fn eval_add() {
         let mut rng = StdRng::from_entropy();
-        let (log_q, log_p, n) = (16, 4, 1024);
-        let param = LweParam::new(log_q, log_p, n);
+        let (q, p, n) = (1 << 16, 1 << 4, 1024);
+        let param = LweParam::new(q, p, n);
         let sk = Lwe::key_gen(&param, &mut rng);
         for (m0, m1) in (0..param.p()).cartesian_product(0..param.p()) {
             let [m0, m1] = [m0, m1].map(|m| Fq::from_u64(param.p(), m));
@@ -185,8 +185,8 @@ mod test {
     #[test]
     fn eval_sub() {
         let mut rng = StdRng::from_entropy();
-        let (log_q, log_p, n) = (16, 4, 1024);
-        let param = LweParam::new(log_q, log_p, n);
+        let (q, p, n) = (1 << 16, 1 << 4, 1024);
+        let param = LweParam::new(q, p, n);
         let sk = Lwe::key_gen(&param, &mut rng);
         for (m0, m1) in (0..param.p()).cartesian_product(0..param.p()) {
             let [m0, m1] = [m0, m1].map(|m| Fq::from_u64(param.p(), m));
@@ -201,9 +201,9 @@ mod test {
     #[test]
     fn key_switch() {
         let mut rng = StdRng::from_entropy();
-        let (log_q, log_p, n0, n1, log_b, k) = (16, 4, 1024, 512, 2, 8);
-        let param0 = LweParam::new(log_q, log_p, n0);
-        let param1 = LweParam::new(log_q, log_p, n1).with_decomposor(log_b, k);
+        let (q, p, n0, n1, log_b, k) = (1 << 16, 1 << 4, 1024, 512, 2, 8);
+        let param0 = LweParam::new(q, p, n0);
+        let param1 = LweParam::new(q, p, n1).with_decomposor(log_b, k);
         let sk0 = Lwe::key_gen(&param0, &mut rng);
         let sk1 = Lwe::key_gen(&param1, &mut rng);
         let ksk = Lwe::ksk_gen(&param1, &sk1, &sk0, &mut rng);

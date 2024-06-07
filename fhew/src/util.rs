@@ -10,7 +10,7 @@ mod poly;
 pub use avec::AVec;
 pub use decompose::{Decomposable, Decomposor};
 pub use fq::{two_adic_primes, Fq};
-pub use poly::Poly;
+pub use poly::{Poly, X};
 
 pub trait Dot<Rhs> {
     type Output;
