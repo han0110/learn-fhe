@@ -3,7 +3,7 @@ use crate::{
     util::{AVec, Decomposable, Decomposor, Dot, Fq, Poly},
 };
 use core::{iter::repeat_with, ops::Deref};
-use itertools::{chain, izip, Itertools};
+use itertools::{chain, izip, Either, Itertools};
 use rand::RngCore;
 
 pub struct Rgsw;
@@ -65,14 +65,36 @@ impl Rgsw {
         pt.0.iter().map(to_fp).collect()
     }
 
-    pub fn encrypt(
+    pub fn sk_encrypt(
+        param: &RgswParam,
+        sk: &RgswSecretKey,
+        pt: &RgswPlaintext,
+        rng: &mut impl RngCore,
+    ) -> RgswCiphertext {
+        Self::encrypt(param, Either::Left(sk), pt, rng)
+    }
+
+    pub fn pk_encrypt(
         param: &RgswParam,
         pk: &RgswPublicKey,
         pt: &RgswPlaintext,
         rng: &mut impl RngCore,
     ) -> RgswCiphertext {
+        Self::encrypt(param, Either::Right(pk), pt, rng)
+    }
+
+    fn encrypt(
+        param: &RgswParam,
+        key: Either<&RgswSecretKey, &RgswPublicKey>,
+        pt: &RgswPlaintext,
+        rng: &mut impl RngCore,
+    ) -> RgswCiphertext {
         let zero = RlwePlaintext(Poly::zero(param.n(), param.q()));
-        let mut cts = repeat_with(|| Rlwe::encrypt(param, pk, &zero, rng))
+        let rlwe_encrypt_zero = || match key {
+            Either::Left(sk) => Rlwe::sk_encrypt(param, sk, &zero, rng),
+            Either::Right(pk) => Rlwe::pk_encrypt(param, pk, &zero, rng),
+        };
+        let mut cts = repeat_with(rlwe_encrypt_zero)
             .take(2 * param.decomposor.k())
             .collect_vec();
         let (c0, c1) = cts.split_at_mut(param.decomposor.k());
@@ -122,8 +144,8 @@ impl Rgsw {
 mod test {
     use crate::{
         rgsw::{Rgsw, RgswParam},
-        rlwe::{Rlwe, RlweParam},
-        util::{two_adic_primes, Poly},
+        rlwe::{test::testing_n_q, Rlwe, RlweParam},
+        util::Poly,
     };
     use core::array::from_fn;
     use rand::{rngs::StdRng, SeedableRng};
@@ -131,74 +153,64 @@ mod test {
     #[test]
     fn encrypt_decrypt() {
         let mut rng = StdRng::from_entropy();
-        let (log_q, log_p, log_b, k) = (45, 4, 5, 9);
-        for log_n in 0..10 {
-            let (n, p) = (1 << log_n, 1 << log_p);
-            for q in two_adic_primes(log_q, log_n + 1).take(10) {
-                let param = RgswParam::new(RlweParam::new(q, p, n), log_b, k);
-                let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
-                let m = Poly::sample_fq_uniform(n, p, &mut rng);
-                let pt = Rgsw::encode(&param, &m);
-                let ct = Rgsw::encrypt(&param, &pk, &pt, &mut rng);
-                assert_eq!(m, Rgsw::decode(&param, &Rgsw::decrypt(&param, &sk, &ct)));
-            }
+        let (log_n_range, log_q, p, log_b, k) = (0..10, 45, 1 << 4, 5, 9);
+        for (n, q) in testing_n_q(log_n_range, log_q) {
+            let param = RgswParam::new(RlweParam::new(q, p, n), log_b, k);
+            let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
+            let m = Poly::sample_fq_uniform(n, p, &mut rng);
+            let pt = Rgsw::encode(&param, &m);
+            let ct0 = Rgsw::sk_encrypt(&param, &sk, &pt, &mut rng);
+            let ct1 = Rgsw::pk_encrypt(&param, &pk, &pt, &mut rng);
+            assert_eq!(m, Rgsw::decode(&param, &Rgsw::decrypt(&param, &sk, &ct0)));
+            assert_eq!(m, Rgsw::decode(&param, &Rgsw::decrypt(&param, &sk, &ct1)));
         }
     }
 
     #[test]
     fn eval_add() {
         let mut rng = StdRng::from_entropy();
-        let (log_q, log_p, log_b, k) = (45, 4, 5, 9);
-        for log_n in 0..10 {
-            let (n, p) = (1 << log_n, 1 << log_p);
-            for q in two_adic_primes(log_q, log_n + 1).take(10) {
-                let param = RgswParam::new(RlweParam::new(q, p, n), log_b, k);
-                let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
-                let [m0, m1] = &from_fn(|_| Poly::sample_fq_uniform(n, p, &mut rng));
-                let [pt0, pt1] = [m0, m1].map(|m| Rgsw::encode(&param, m));
-                let [ct0, ct1] = [pt0, pt1].map(|pt| Rgsw::encrypt(&param, &pk, &pt, &mut rng));
-                let ct2 = Rgsw::eval_add(&param, &ct0, &ct1);
-                let m2 = m0 + m1;
-                assert_eq!(m2, Rgsw::decode(&param, &Rgsw::decrypt(&param, &sk, &ct2)));
-            }
+        let (log_n_range, log_q, p, log_b, k) = (0..10, 45, 1 << 4, 5, 9);
+        for (n, q) in testing_n_q(log_n_range, log_q) {
+            let param = RgswParam::new(RlweParam::new(q, p, n), log_b, k);
+            let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
+            let [m0, m1] = &from_fn(|_| Poly::sample_fq_uniform(n, p, &mut rng));
+            let [pt0, pt1] = [m0, m1].map(|m| Rgsw::encode(&param, m));
+            let [ct0, ct1] = [pt0, pt1].map(|pt| Rgsw::pk_encrypt(&param, &pk, &pt, &mut rng));
+            let ct2 = Rgsw::eval_add(&param, &ct0, &ct1);
+            let m2 = m0 + m1;
+            assert_eq!(m2, Rgsw::decode(&param, &Rgsw::decrypt(&param, &sk, &ct2)));
         }
     }
 
     #[test]
     fn eval_sub() {
         let mut rng = StdRng::from_entropy();
-        let (log_q, log_p, log_b, k) = (45, 4, 5, 9);
-        for log_n in 0..10 {
-            let (n, p) = (1 << log_n, 1 << log_p);
-            for q in two_adic_primes(log_q, log_n + 1).take(10) {
-                let param = RgswParam::new(RlweParam::new(q, p, n), log_b, k);
-                let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
-                let [m0, m1] = &from_fn(|_| Poly::sample_fq_uniform(n, p, &mut rng));
-                let [pt0, pt1] = [m0, m1].map(|m| Rgsw::encode(&param, m));
-                let [ct0, ct1] = [pt0, pt1].map(|pt| Rgsw::encrypt(&param, &pk, &pt, &mut rng));
-                let ct2 = Rgsw::eval_sub(&param, &ct0, &ct1);
-                let m2 = m0 - m1;
-                assert_eq!(m2, Rgsw::decode(&param, &Rgsw::decrypt(&param, &sk, &ct2)));
-            }
+        let (log_n_range, log_q, p, log_b, k) = (0..10, 45, 1 << 4, 5, 9);
+        for (n, q) in testing_n_q(log_n_range, log_q) {
+            let param = RgswParam::new(RlweParam::new(q, p, n), log_b, k);
+            let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
+            let [m0, m1] = &from_fn(|_| Poly::sample_fq_uniform(n, p, &mut rng));
+            let [pt0, pt1] = [m0, m1].map(|m| Rgsw::encode(&param, m));
+            let [ct0, ct1] = [pt0, pt1].map(|pt| Rgsw::pk_encrypt(&param, &pk, &pt, &mut rng));
+            let ct2 = Rgsw::eval_sub(&param, &ct0, &ct1);
+            let m2 = m0 - m1;
+            assert_eq!(m2, Rgsw::decode(&param, &Rgsw::decrypt(&param, &sk, &ct2)));
         }
     }
 
     #[test]
     fn external_product() {
         let mut rng = StdRng::from_entropy();
-        let (log_q, log_p, log_b, k) = (45, 4, 5, 9);
-        for log_n in 0..10 {
-            let (n, p) = (1 << log_n, 1 << log_p);
-            for q in two_adic_primes(log_q, log_n + 1).take(10) {
-                let param = RgswParam::new(RlweParam::new(q, p, n), log_b, k);
-                let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
-                let [m0, m1] = &from_fn(|_| Poly::sample_fq_uniform(n, p, &mut rng));
-                let ct0 = Rgsw::encrypt(&param, &pk, &Rgsw::encode(&param, m0), &mut rng);
-                let ct1 = Rlwe::encrypt(&param, &pk, &Rlwe::encode(&param, m1), &mut rng);
-                let ct2 = Rgsw::external_product(&param, &ct0, &ct1);
-                let m2 = m0 * m1;
-                assert_eq!(m2, Rlwe::decode(&param, &Rlwe::decrypt(&param, &sk, &ct2)));
-            }
+        let (log_n_range, log_q, p, log_b, k) = (0..10, 45, 1 << 4, 5, 9);
+        for (n, q) in testing_n_q(log_n_range, log_q) {
+            let param = RgswParam::new(RlweParam::new(q, p, n), log_b, k);
+            let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
+            let [m0, m1] = &from_fn(|_| Poly::sample_fq_uniform(n, p, &mut rng));
+            let ct0 = Rgsw::pk_encrypt(&param, &pk, &Rgsw::encode(&param, m0), &mut rng);
+            let ct1 = Rlwe::pk_encrypt(&param, &pk, &Rlwe::encode(&param, m1), &mut rng);
+            let ct2 = Rgsw::external_product(&param, &ct0, &ct1);
+            let m2 = m0 * m1;
+            assert_eq!(m2, Rlwe::decode(&param, &Rlwe::decrypt(&param, &sk, &ct2)));
         }
     }
 }

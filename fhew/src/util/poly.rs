@@ -33,6 +33,32 @@ impl Poly<Fq> {
         Self(vec![Fq::from_u64(q, 0); n].into())
     }
 
+    pub fn monomial(n: usize, q: u64, i: i64) -> Self {
+        let mut poly = Self::zero(n, q);
+        let i = i.rem_euclid(2 * n as i64) as usize;
+        if i < n {
+            poly[i] += 1;
+        } else {
+            poly[i - n] -= 1;
+        }
+        poly
+    }
+
+    pub fn automorphism(&self, t: i64) -> Self {
+        let mut poly = Self::zero(self.n(), self[0].q());
+        let n = self.n();
+        let t = t.rem_euclid(2 * n as i64) as usize;
+        (0..n).for_each(|i| {
+            let it = (i * t) % (2 * n);
+            if it < n {
+                poly[it] = self[i]
+            } else {
+                poly[it - n] = -self[i]
+            }
+        });
+        poly
+    }
+
     pub fn sample_fq_uniform(n: usize, q: u64, rng: &mut impl RngCore) -> Self {
         assert!(n.is_power_of_two());
         Self(AVec::sample_fq_uniform(n, q, rng))
