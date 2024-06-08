@@ -16,7 +16,7 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Fq {
     q: u64,
     v: u64,
@@ -86,23 +86,25 @@ impl Fq {
         (self.v != 0)
             .then(move || Self::from_i64(self.q, (self.v as i64).extended_gcd(&(self.q as i64)).x))
     }
-}
 
-impl From<Fq> for u64 {
-    fn from(value: Fq) -> Self {
-        value.v
+    pub fn mod_switch(self, q_prime: u64) -> Self {
+        Self::from_f64(q_prime, (self.v as f64 * q_prime as f64) / self.q as f64)
+    }
+
+    pub fn mod_switch_odd(self, q_prime: u64) -> Self {
+        let v = (self.v as f64 * q_prime as f64) / self.q as f64;
+        let u = v.floor();
+        if u == 0.0 {
+            Self::from_u64(q_prime, v.round() as u64)
+        } else {
+            Self::from_u64(q_prime, u as u64 | 1)
+        }
     }
 }
 
 impl From<&Fq> for u64 {
     fn from(value: &Fq) -> Self {
         value.v
-    }
-}
-
-impl From<Fq> for i64 {
-    fn from(value: Fq) -> Self {
-        value.into_c64()
     }
 }
 
@@ -121,6 +123,19 @@ impl From<Fq> for f64 {
 impl From<&Fq> for f64 {
     fn from(value: &Fq) -> Self {
         value.into_c64() as f64
+    }
+}
+
+impl Ord for Fq {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        assert_eq!(self.q, other.q);
+        self.v.cmp(&other.v)
+    }
+}
+
+impl PartialOrd for Fq {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -251,7 +266,17 @@ macro_rules! impl_ops_with_primitive {
                         }
                     }
                 }
+                impl From<&Fq> for $p1 {
+                    fn from(value: &Fq) -> $p1 {
+                        <$p2>::from(value).try_into().unwrap()
+                    }
+                }
             )?
+            impl From<Fq> for $p1 {
+                fn from(value: Fq) -> $p1 {
+                    (&value).into()
+                }
+            }
             impl_ops_with_primitive!(
                 impl AddAssign<&$p1> for Fq,
                 impl SubAssign<&$p1> for Fq,
@@ -267,7 +292,16 @@ macro_rules! impl_ops_with_primitive {
 }
 
 impl_ops_with_primitive!(
-    u64, i64, u32 as u64, i32 as i64, u16 as u64, i16 as i64, u8 as u64, i8 as i64
+    u64,
+    i64,
+    u32 as u64,
+    i32 as i64,
+    u16 as u64,
+    i16 as i64,
+    u8 as u64,
+    i8 as i64,
+    usize as u64,
+    isize as i64,
 );
 
 pub static NEG_NTT_PSI: OnceLock<Mutex<HashMap<u64, [Vec<Fq>; 2]>>> = OnceLock::new();

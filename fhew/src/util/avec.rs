@@ -21,6 +21,10 @@ impl<T> AVec<T> {
 }
 
 impl AVec<Fq> {
+    pub fn zero(n: usize, q: u64) -> Self {
+        Self(vec![Fq::from_u64(q, 0); n])
+    }
+
     pub fn sample_fq_uniform(n: usize, q: u64, rng: &mut impl RngCore) -> Self {
         repeat_with(|| Fq::sample_uniform(q, rng)).take(n).collect()
     }
@@ -34,6 +38,14 @@ impl AVec<Fq> {
         repeat_with(|| Fq::sample_i8(q, dist, rng))
             .take(n)
             .collect()
+    }
+
+    pub fn mod_switch(&self, q_prime: u64) -> Self {
+        self.iter().map(|v| v.mod_switch(q_prime)).collect()
+    }
+
+    pub fn mod_switch_odd(&self, q_prime: u64) -> Self {
+        self.iter().map(|v| v.mod_switch_odd(q_prime)).collect()
     }
 }
 

@@ -8,28 +8,28 @@ use crate::util::Fq;
 pub struct Decomposor {
     q: u64,
     log_b: usize,
-    k: usize,
+    d: usize,
     rounding_bits: usize,
 }
 
 impl Decomposor {
-    pub fn new(q: u64, log_b: usize, k: usize) -> Self {
+    pub fn new(q: u64, log_b: usize, d: usize) -> Self {
         let log_q_ceil = q.next_power_of_two().ilog2() as usize;
-        let rounding_bits = log_q_ceil.saturating_sub(log_b * k);
+        let rounding_bits = log_q_ceil.saturating_sub(log_b * d);
         Self {
             q,
             log_b,
-            k,
+            d,
             rounding_bits,
         }
     }
 
-    pub fn k(&self) -> usize {
-        self.k
+    pub fn d(&self) -> usize {
+        self.d
     }
 
     pub fn log_bases(&self) -> impl Iterator<Item = usize> {
-        (self.rounding_bits..).step_by(self.log_b).take(self.k)
+        (self.rounding_bits..).step_by(self.log_b).take(self.d)
     }
 
     pub fn bases(&self) -> impl Iterator<Item = Fq> + '_ {
@@ -40,7 +40,7 @@ impl Decomposor {
         value
             .rounding_shr(self.rounding_bits)
             .decompose(self.log_b)
-            .take(self.k)
+            .take(self.d)
     }
 }
 

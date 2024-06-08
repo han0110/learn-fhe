@@ -1,6 +1,6 @@
 use crate::{
     rlwe::RlweSecretKey,
-    util::{dg, zo, AVec, Decomposor, Dot, Fq},
+    util::{dg, AVec, Decomposor, Dot, Fq},
 };
 use itertools::chain;
 use rand::RngCore;
@@ -28,8 +28,8 @@ impl LweParam {
         }
     }
 
-    pub fn with_decomposor(mut self, log_b: usize, k: usize) -> Self {
-        self.decomposor = Some(Decomposor::new(self.q(), log_b, k));
+    pub fn with_decomposor(mut self, log_b: usize, d: usize) -> Self {
+        self.decomposor = Some(Decomposor::new(self.q(), log_b, d));
         self
     }
 
@@ -57,9 +57,9 @@ impl LweParam {
 #[derive(Debug)]
 pub struct LweSecretKey(pub(crate) AVec<i8>);
 
-impl From<RlweSecretKey> for LweSecretKey {
-    fn from(value: RlweSecretKey) -> Self {
-        LweSecretKey(value.0.into())
+impl From<&RlweSecretKey> for LweSecretKey {
+    fn from(value: &RlweSecretKey) -> Self {
+        LweSecretKey(value.0.clone().into())
     }
 }
 
@@ -77,7 +77,7 @@ impl LweKeySwitchingKey {
 }
 
 #[derive(Debug)]
-pub struct LwePlaintext(Fq);
+pub struct LwePlaintext(pub(crate) Fq);
 
 #[derive(Debug)]
 pub struct LweCiphertext(pub(crate) AVec<Fq>, pub(crate) Fq);
@@ -105,7 +105,7 @@ impl LweCiphertext {
 
 impl Lwe {
     pub fn key_gen(param: &LweParam, rng: &mut impl RngCore) -> LweSecretKey {
-        let sk = AVec::sample(param.n, &zo(0.5), rng);
+        let sk = AVec::sample(param.n, &dg(3.2, 6), rng);
         LweSecretKey(sk)
     }
 
@@ -131,6 +131,10 @@ impl Lwe {
         Fq::from_f64(param.p(), f64::from(pt.0) / param.delta())
     }
 
+    pub fn trivial_encrypt(param: &LweParam, pt: &LwePlaintext) -> LweCiphertext {
+        LweCiphertext(AVec::zero(param.n, param.q()), pt.0)
+    }
+
     pub fn sk_encrypt(
         param: &LweParam,
         sk: &LweSecretKey,
@@ -150,6 +154,10 @@ impl Lwe {
 
     pub fn eval_add(_: &LweParam, ct0: &LweCiphertext, ct1: &LweCiphertext) -> LweCiphertext {
         LweCiphertext(ct0.a() + ct1.a(), ct0.b() + ct1.b())
+    }
+
+    pub fn eval_double(param: &LweParam, ct: &LweCiphertext) -> LweCiphertext {
+        Lwe::eval_add(param, ct, ct)
     }
 
     pub fn eval_sub(_: &LweParam, ct0: &LweCiphertext, ct1: &LweCiphertext) -> LweCiphertext {
@@ -228,9 +236,9 @@ mod test {
     #[test]
     fn key_switch() {
         let mut rng = StdRng::from_entropy();
-        let (q, p, n0, n1, log_b, k) = (1 << 16, 1 << 4, 1024, 512, 2, 8);
+        let (q, p, n0, n1, log_b, d) = (1 << 16, 1 << 4, 1024, 512, 2, 8);
         let param0 = LweParam::new(q, p, n0);
-        let param1 = LweParam::new(q, p, n1).with_decomposor(log_b, k);
+        let param1 = LweParam::new(q, p, n1).with_decomposor(log_b, d);
         let sk0 = Lwe::key_gen(&param0, &mut rng);
         let sk1 = Lwe::key_gen(&param1, &mut rng);
         let ksk = Lwe::ksk_gen(&param1, &sk1, &sk0, &mut rng);

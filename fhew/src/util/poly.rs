@@ -61,17 +61,6 @@ impl Poly<Fq> {
         poly
     }
 
-    pub fn monomial(n: usize, q: u64, i: i64) -> Self {
-        let mut poly = Self::zero(n, q);
-        let i = i.rem_euclid(2 * n as i64) as usize;
-        if i < n {
-            poly[i] += 1;
-        } else {
-            poly[i - n] -= 1;
-        }
-        poly
-    }
-
     pub fn sample_fq_uniform(n: usize, q: u64, rng: &mut impl RngCore) -> Self {
         Self::new(AVec::sample_fq_uniform(n, q, rng))
     }
@@ -83,6 +72,14 @@ impl Poly<Fq> {
         rng: &mut impl RngCore,
     ) -> Self {
         Self::new(AVec::sample_fq_from_i8(n, q, dist, rng))
+    }
+
+    pub fn mod_switch(&self, q_prime: u64) -> Self {
+        Self(self.0.mod_switch(q_prime))
+    }
+
+    pub fn mod_switch_odd(&self, q_prime: u64) -> Self {
+        Self(self.0.mod_switch_odd(q_prime))
     }
 }
 
@@ -348,6 +345,14 @@ impl BitXor<&i8> for X {
 
     fn bitxor(self, rhs: &i8) -> Self::Output {
         Monomial(*rhs as i64)
+    }
+}
+
+impl BitXor<Fq> for X {
+    type Output = Monomial;
+
+    fn bitxor(self, rhs: Fq) -> Self::Output {
+        Monomial(rhs.into())
     }
 }
 

@@ -25,8 +25,8 @@ impl RlweParam {
         Self(LweParam::new(q, p, 1 << log_n))
     }
 
-    pub fn with_decomposor(self, log_b: usize, k: usize) -> Self {
-        Self(self.0.with_decomposor(log_b, k))
+    pub fn with_decomposor(self, log_b: usize, d: usize) -> Self {
+        Self(self.0.with_decomposor(log_b, d))
     }
 
     pub fn log_n(&self) -> usize {
@@ -37,9 +37,9 @@ impl RlweParam {
 #[derive(Debug)]
 pub struct RlweSecretKey(pub(crate) Poly<i8>);
 
-impl From<LweSecretKey> for RlweSecretKey {
-    fn from(value: LweSecretKey) -> Self {
-        RlweSecretKey(value.0.into())
+impl From<&LweSecretKey> for RlweSecretKey {
+    fn from(value: &LweSecretKey) -> Self {
+        RlweSecretKey(value.0.clone().into())
     }
 }
 
@@ -110,7 +110,7 @@ impl Rlwe {
     pub const AUTO_G: i64 = 5;
 
     pub fn key_gen(param: &RlweParam, rng: &mut impl RngCore) -> (RlweSecretKey, RlwePublicKey) {
-        let sk = RlweSecretKey(Poly::sample(param.n(), &zo(0.5), rng));
+        let sk = RlweSecretKey(Poly::sample(param.n(), &dg(3.2, 6), rng));
         let pk = {
             let a = Poly::sample_fq_uniform(param.n(), param.q(), rng);
             let e = Poly::sample_fq_from_i8(param.n(), param.q(), &dg(3.2, 6), rng);
@@ -155,6 +155,10 @@ impl Rlwe {
     pub fn decode(param: &RlweParam, pt: &RlwePlaintext) -> Poly<Fq> {
         let scale_down = |m| Fq::from_f64(param.p(), f64::from(m) / param.delta());
         pt.0.iter().map(scale_down).collect()
+    }
+
+    pub fn trivial_encrypt(param: &RlweParam, pt: &RlwePlaintext) -> RlweCiphertext {
+        RlweCiphertext(Poly::zero(param.n(), param.q()), pt.0.clone())
     }
 
     pub fn sk_encrypt(
@@ -297,10 +301,10 @@ pub(crate) mod test {
     #[test]
     fn key_switch() {
         let mut rng = StdRng::from_entropy();
-        let (log_n_range, log_q, p, log_b, k) = (0..10, 45, 1 << 4, 5, 9);
+        let (log_n_range, log_q, p, log_b, d) = (0..10, 45, 1 << 4, 5, 9);
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param0 = RlweParam::new(q, p, log_n);
-            let param1 = RlweParam::new(q, p, log_n).with_decomposor(log_b, k);
+            let param1 = RlweParam::new(q, p, log_n).with_decomposor(log_b, d);
             let (sk0, pk0) = Rlwe::key_gen(&param0, &mut rng);
             let (sk1, _) = Rlwe::key_gen(&param1, &mut rng);
             let ksk = Rlwe::ksk_gen(&param1, &sk1, &sk0, &mut rng);
@@ -318,10 +322,10 @@ pub(crate) mod test {
     #[test]
     fn automorphism() {
         let mut rng = StdRng::from_entropy();
-        let (log_n_range, log_q, p, log_b, k) = (0..10, 45, 1 << 4, 5, 9);
+        let (log_n_range, log_q, p, log_b, d) = (0..10, 45, 1 << 4, 5, 9);
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             for t in [-Rlwe::AUTO_G, Rlwe::AUTO_G] {
-                let param = RlweParam::new(q, p, log_n).with_decomposor(log_b, k);
+                let param = RlweParam::new(q, p, log_n).with_decomposor(log_b, d);
                 let (sk, pk) = Rlwe::key_gen(&param, &mut rng);
                 let ak = Rlwe::ak_gen(&param, &sk, t, &mut rng);
                 let m = Poly::sample_fq_uniform(param.n(), p, &mut rng);
@@ -343,7 +347,7 @@ pub(crate) mod test {
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RlweParam::new(q, p, log_n);
             let (sk, pk) = Rlwe::key_gen(&param, &mut rng);
-            let sk = sk.into();
+            let sk = (&sk).into();
             let m = Poly::sample_fq_uniform(param.n(), p, &mut rng);
             let pt = Rlwe::encode(&param, &m);
             let ct = Rlwe::pk_encrypt(&param, &pk, &pt, &mut rng);

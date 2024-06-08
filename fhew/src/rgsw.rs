@@ -24,8 +24,8 @@ impl Deref for RgswParam {
 }
 
 impl RgswParam {
-    pub fn new(rlwe: RlweParam, log_b: usize, k: usize) -> Self {
-        let decomposor = Decomposor::new(rlwe.q(), log_b, k);
+    pub fn new(rlwe: RlweParam, log_b: usize, d: usize) -> Self {
+        let decomposor = Decomposor::new(rlwe.q(), log_b, d);
         Self { rlwe, decomposor }
     }
 }
@@ -98,9 +98,9 @@ impl Rgsw {
             Either::Right(pk) => Rlwe::pk_encrypt(param, pk, &zero, rng),
         };
         let mut cts = repeat_with(rlwe_encrypt_zero)
-            .take(2 * param.decomposor.k())
+            .take(2 * param.decomposor.d())
             .collect_vec();
-        let (c0, c1) = cts.split_at_mut(param.decomposor.k());
+        let (c0, c1) = cts.split_at_mut(param.decomposor.d());
         izip!(c0, param.decomposor.bases()).for_each(|(ct, bi)| ct.0 += &pt.0 * bi);
         izip!(c1, param.decomposor.bases()).for_each(|(ct, bi)| ct.1 += &pt.0 * bi);
         RgswCiphertext(cts)
@@ -156,9 +156,9 @@ mod test {
     #[test]
     fn encrypt_decrypt() {
         let mut rng = StdRng::from_entropy();
-        let (log_n_range, log_q, p, log_b, k) = (0..10, 45, 1 << 4, 5, 9);
+        let (log_n_range, log_q, p, log_b, d) = (0..10, 45, 1 << 4, 5, 9);
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
-            let param = RgswParam::new(RlweParam::new(q, p, log_n), log_b, k);
+            let param = RgswParam::new(RlweParam::new(q, p, log_n), log_b, d);
             let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
             let m = Poly::sample_fq_uniform(param.n(), p, &mut rng);
             let pt = Rgsw::encode(&param, &m);
@@ -172,9 +172,9 @@ mod test {
     #[test]
     fn eval_add() {
         let mut rng = StdRng::from_entropy();
-        let (log_n_range, log_q, p, log_b, k) = (0..10, 45, 1 << 4, 5, 9);
+        let (log_n_range, log_q, p, log_b, d) = (0..10, 45, 1 << 4, 5, 9);
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
-            let param = RgswParam::new(RlweParam::new(q, p, log_n), log_b, k);
+            let param = RgswParam::new(RlweParam::new(q, p, log_n), log_b, d);
             let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
             let [m0, m1] = &from_fn(|_| Poly::sample_fq_uniform(param.n(), p, &mut rng));
             let [pt0, pt1] = [m0, m1].map(|m| Rgsw::encode(&param, m));
@@ -188,9 +188,9 @@ mod test {
     #[test]
     fn eval_sub() {
         let mut rng = StdRng::from_entropy();
-        let (log_n_range, log_q, p, log_b, k) = (0..10, 45, 1 << 4, 5, 9);
+        let (log_n_range, log_q, p, log_b, d) = (0..10, 45, 1 << 4, 5, 9);
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
-            let param = RgswParam::new(RlweParam::new(q, p, log_n), log_b, k);
+            let param = RgswParam::new(RlweParam::new(q, p, log_n), log_b, d);
             let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
             let [m0, m1] = &from_fn(|_| Poly::sample_fq_uniform(param.n(), p, &mut rng));
             let [pt0, pt1] = [m0, m1].map(|m| Rgsw::encode(&param, m));
@@ -204,9 +204,9 @@ mod test {
     #[test]
     fn external_product() {
         let mut rng = StdRng::from_entropy();
-        let (log_n_range, log_q, p, log_b, k) = (0..10, 45, 1 << 4, 5, 9);
+        let (log_n_range, log_q, p, log_b, d) = (0..10, 45, 1 << 4, 5, 9);
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
-            let param = RgswParam::new(RlweParam::new(q, p, log_n), log_b, k);
+            let param = RgswParam::new(RlweParam::new(q, p, log_n), log_b, d);
             let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
             let [m0, m1] = &from_fn(|_| Poly::sample_fq_uniform(param.n(), p, &mut rng));
             let ct0 = Rgsw::pk_encrypt(&param, &pk, &Rgsw::encode(&param, m0), &mut rng);
