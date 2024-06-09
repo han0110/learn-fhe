@@ -4,7 +4,7 @@
 use crate::{
     boostrapping::{Boostraping, BoostrapingKey, BoostrapingParam},
     lwe::{Lwe, LweCiphertext, LwePlaintext, LweSecretKey},
-    util::{Fq, Poly},
+    util::Fq,
 };
 use core::iter::repeat;
 use rand::RngCore;
@@ -12,26 +12,15 @@ use rand::RngCore;
 #[derive(Debug)]
 pub struct Fhew;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FhewBit(LweCiphertext);
-
-#[derive(Clone, Copy, Debug)]
-enum FhewBitOps {
-    And,
-    Nand,
-    Or,
-    Nor,
-    Xor,
-    Xnor,
-    Majority,
-}
 
 impl Fhew {
     fn encode(param: &BoostrapingParam, m: bool) -> LwePlaintext {
-        Lwe::encode(param.lwe_z(), &Fq::from_i8(param.p(), m as i8))
+        Lwe::encode(param.lwe_z(), Fq::from_i8(param.p(), m as i8))
     }
 
-    fn decode(param: &BoostrapingParam, pt: &LwePlaintext) -> bool {
+    fn decode(param: &BoostrapingParam, pt: LwePlaintext) -> bool {
         let m = u64::from(Lwe::decode(param.lwe_z(), pt));
         assert!(m == 0 || m == 1);
         m == 1
@@ -44,116 +33,68 @@ impl Fhew {
         rng: &mut impl RngCore,
     ) -> FhewBit {
         let pt = Fhew::encode(param, m);
-        let ct = Lwe::sk_encrypt(param.lwe_z(), sk, &pt, rng);
+        let ct = Lwe::sk_encrypt(param.lwe_z(), sk, pt, rng);
         FhewBit(ct)
     }
 
-    pub fn decrypt(param: &BoostrapingParam, sk: &LweSecretKey, ct: &FhewBit) -> bool {
-        let pt = Lwe::decrypt(param.lwe_z(), sk, &ct.0);
-        Fhew::decode(param, &pt)
+    pub fn decrypt(param: &BoostrapingParam, sk: &LweSecretKey, ct: FhewBit) -> bool {
+        let pt = Lwe::decrypt(param.lwe_z(), sk, ct.0);
+        Fhew::decode(param, pt)
     }
 
-    // Table 1 in 2020/086.
-    fn f(param: &BoostrapingParam, op: FhewBitOps) -> Poly<Fq> {
-        let map = [-param.big_q_by_8(), param.big_q_by_8()];
-        let truth_table = match op {
-            FhewBitOps::And => [0, 0, 0, 1],
-            FhewBitOps::Nand => [1, 1, 1, 0],
-            FhewBitOps::Or => [0, 1, 1, 1],
-            FhewBitOps::Nor => [1, 0, 0, 0],
-            FhewBitOps::Xor => [0, 1, 1, 1],
-            FhewBitOps::Xnor => [1, 0, 0, 0],
-            FhewBitOps::Majority => [0, 0, 0, 1],
-        };
-        truth_table
-            .into_iter()
-            .flat_map(|out| repeat(map[out]).take(param.q_by_8()))
-            .collect()
+    pub fn not(
+        param: &BoostrapingParam,
+        _: &BoostrapingKey,
+        FhewBit(LweCiphertext(a, b)): FhewBit,
+    ) -> FhewBit {
+        FhewBit(LweCiphertext(-a, -b + param.big_q_by_4()))
     }
 
     fn op(
         param: &BoostrapingParam,
         bk: &BoostrapingKey,
-        op: FhewBitOps,
+        table: [usize; 4],
         ct: LweCiphertext,
     ) -> FhewBit {
-        let f = Fhew::f(param, op);
-        let ct = Boostraping::boostrap(param, bk, &f, &ct);
-        let big_q_by_8 = Lwe::trivial_encrypt(param.lwe_z(), &LwePlaintext(param.big_q_by_8()));
-        FhewBit(Lwe::eval_add(param.lwe_z(), &ct, &big_q_by_8))
-    }
-
-    pub fn and(
-        param: &BoostrapingParam,
-        bk: &BoostrapingKey,
-        FhewBit(ct0): &FhewBit,
-        FhewBit(ct1): &FhewBit,
-    ) -> FhewBit {
-        let ct = Lwe::eval_add(param.lwe_z(), ct0, ct1);
-        Self::op(param, bk, FhewBitOps::And, ct)
-    }
-
-    pub fn nand(
-        param: &BoostrapingParam,
-        bk: &BoostrapingKey,
-        FhewBit(ct0): &FhewBit,
-        FhewBit(ct1): &FhewBit,
-    ) -> FhewBit {
-        let ct = Lwe::eval_add(param.lwe_z(), ct0, ct1);
-        Self::op(param, bk, FhewBitOps::Nand, ct)
-    }
-
-    pub fn or(
-        param: &BoostrapingParam,
-        bk: &BoostrapingKey,
-        FhewBit(ct0): &FhewBit,
-        FhewBit(ct1): &FhewBit,
-    ) -> FhewBit {
-        let ct = Lwe::eval_add(param.lwe_z(), ct0, ct1);
-        Self::op(param, bk, FhewBitOps::Or, ct)
-    }
-
-    pub fn nor(
-        param: &BoostrapingParam,
-        bk: &BoostrapingKey,
-        FhewBit(ct0): &FhewBit,
-        FhewBit(ct1): &FhewBit,
-    ) -> FhewBit {
-        let ct = Lwe::eval_add(param.lwe_z(), ct0, ct1);
-        Self::op(param, bk, FhewBitOps::Nor, ct)
-    }
-
-    pub fn xor(
-        param: &BoostrapingParam,
-        bk: &BoostrapingKey,
-        FhewBit(ct0): &FhewBit,
-        FhewBit(ct1): &FhewBit,
-    ) -> FhewBit {
-        let ct = Lwe::eval_double(param.lwe_z(), &Lwe::eval_sub(param.lwe_z(), ct0, ct1));
-        Self::op(param, bk, FhewBitOps::Xor, ct)
-    }
-
-    pub fn xnor(
-        param: &BoostrapingParam,
-        bk: &BoostrapingKey,
-        FhewBit(ct0): &FhewBit,
-        FhewBit(ct1): &FhewBit,
-    ) -> FhewBit {
-        let ct = Lwe::eval_double(param.lwe_z(), &Lwe::eval_sub(param.lwe_z(), ct0, ct1));
-        Self::op(param, bk, FhewBitOps::Xnor, ct)
-    }
-
-    pub fn majority(
-        param: &BoostrapingParam,
-        bk: &BoostrapingKey,
-        FhewBit(ct0): &FhewBit,
-        FhewBit(ct1): &FhewBit,
-        FhewBit(ct2): &FhewBit,
-    ) -> FhewBit {
-        let ct = Lwe::eval_add(param.lwe_z(), &Lwe::eval_add(param.lwe_z(), ct0, ct1), ct2);
-        Self::op(param, bk, FhewBitOps::Majority, ct)
+        let map = [-param.big_q_by_8(), param.big_q_by_8()];
+        let f = table
+            .into_iter()
+            .flat_map(|out| repeat(map[out]).take(param.q_by_8()))
+            .collect();
+        let LweCiphertext(a, b) = Boostraping::boostrap(param, bk, &f, ct);
+        FhewBit(LweCiphertext(a, b + param.big_q_by_8()))
     }
 }
+
+macro_rules! impl_op {
+    (@ $op:ident, $table:expr, |$ct0:ident, $ct1:ident $(, $ct2:ident)?| $preprocess:expr) => {
+        impl Fhew {
+            pub fn $op(
+                param: &BoostrapingParam,
+                bk: &BoostrapingKey,
+                FhewBit($ct0): FhewBit,
+                FhewBit($ct1): FhewBit,
+                $(FhewBit($ct2): FhewBit,)?
+            ) -> FhewBit {
+                Fhew::op(param, bk, $table, $preprocess)
+            }
+        }
+    };
+    ($($op:ident, $table:expr, |$ct0:ident, $ct1:ident $(, $ct2:ident)?| $preprocess:expr);* $(;)?) => {
+        $(impl_op!(@ $op, $table, |$ct0, $ct1 $(, $ct2)?| $preprocess);)*
+    }
+}
+
+// Table 1 in 2020/086.
+impl_op!(
+         and, [0, 0, 0, 1], |ct0, ct1| ct0 + ct1;
+        nand, [1, 1, 1, 0], |ct0, ct1| ct0 + ct1;
+          or, [0, 1, 1, 1], |ct0, ct1| ct0 + ct1;
+         nor, [1, 0, 0, 0], |ct0, ct1| ct0 + ct1;
+         xor, [0, 1, 1, 1], |ct0, ct1| (ct0 - ct1).double();
+        xnor, [1, 0, 0, 0], |ct0, ct1| (ct0 - ct1).double();
+    majority, [0, 0, 0, 1], |ct0, ct1, ct2| ct0 + ct1 + ct2;
+);
 
 #[cfg(test)]
 mod test {
@@ -169,7 +110,7 @@ mod test {
     use rand::{rngs::StdRng, SeedableRng};
 
     #[test]
-    fn fhew_bitwise_ops() {
+    fn ops() {
         let mut rng = StdRng::from_entropy();
         let param = {
             let p = 4;
@@ -180,7 +121,7 @@ mod test {
                 RgswParam::new(rlwe, log_b, d)
             };
             let lwe = {
-                let (n, q, log_b, d) = (458, 1 << 14, 3, 5);
+                let (n, q, log_b, d) = (458, 1 << 14, 2, 7);
                 LweParam::new(q, p, n).with_decomposor(log_b, d)
             };
             let w = 10;
@@ -193,14 +134,19 @@ mod test {
         };
 
         macro_rules! assert_correct_op {
-            ($op:ident($ct0:ident, $ct1:ident $(, $ct2:ident)?) == $output:expr) => {
+            ($op:ident($ct0:ident $(, $ct1:ident $(, $ct2:ident)?)?) == $output:expr) => {
                 assert_eq!(
                     $output,
-                    Fhew::decrypt(&param, &z, &Fhew::$op(&param, &bk, &$ct0, &$ct1 $(, &$ct2)?))
+                    Fhew::decrypt(&param, &z, Fhew::$op(&param, &bk, $ct0.clone() $(, $ct1.clone() $(, $ct2.clone())?)?))
                 )
             };
         }
 
+        for m in 0..1 << 1 {
+            let m = m == 1;
+            let ct = Fhew::sk_encrypt(&param, &z, m, &mut rng);
+            assert_correct_op!(not(ct) == !m);
+        }
         for m in 0..1 << 2 {
             let [m0, m1] = from_fn(|i| (m >> i) & 1 == 1);
             let [ct0, ct1] = [m0, m1].map(|m| Fhew::sk_encrypt(&param, &z, m, &mut rng));

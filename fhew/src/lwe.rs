@@ -2,6 +2,7 @@ use crate::{
     rlwe::RlweSecretKey,
     util::{dg, AVec, Decomposor, Dot, Fq},
 };
+use derive_more::{Add, Sub};
 use itertools::chain;
 use rand::RngCore;
 
@@ -54,7 +55,7 @@ impl LweParam {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LweSecretKey(pub(crate) AVec<i8>);
 
 impl From<&RlweSecretKey> for LweSecretKey {
@@ -63,7 +64,7 @@ impl From<&RlweSecretKey> for LweSecretKey {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LweKeySwitchingKey(Vec<LweCiphertext>);
 
 impl LweKeySwitchingKey {
@@ -76,10 +77,10 @@ impl LweKeySwitchingKey {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LwePlaintext(pub(crate) Fq);
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Add, Sub)]
 pub struct LweCiphertext(pub(crate) AVec<Fq>, pub(crate) Fq);
 
 impl LweCiphertext {
@@ -89,6 +90,10 @@ impl LweCiphertext {
 
     pub fn b(&self) -> &Fq {
         &self.1
+    }
+
+    pub fn double(self) -> Self {
+        self.clone() + self
     }
 
     pub fn mod_switch(&self, q_prime: u64) -> Self {
@@ -117,28 +122,24 @@ impl Lwe {
     ) -> LweKeySwitchingKey {
         let ksk = chain![&sk1.0]
             .flat_map(|sk1i| param.decomposor().bases().map(move |bi| -bi * sk1i))
-            .map(|m| Lwe::sk_encrypt(param, sk0, &LwePlaintext(m), rng))
+            .map(|m| Lwe::sk_encrypt(param, sk0, LwePlaintext(m), rng))
             .collect();
         LweKeySwitchingKey(ksk)
     }
 
-    pub fn encode(param: &LweParam, m: &Fq) -> LwePlaintext {
+    pub fn encode(param: &LweParam, m: Fq) -> LwePlaintext {
         assert_eq!(m.q(), param.p());
         LwePlaintext(Fq::from_f64(param.q(), f64::from(m) * param.delta()))
     }
 
-    pub fn decode(param: &LweParam, pt: &LwePlaintext) -> Fq {
+    pub fn decode(param: &LweParam, pt: LwePlaintext) -> Fq {
         Fq::from_f64(param.p(), f64::from(pt.0) / param.delta())
-    }
-
-    pub fn trivial_encrypt(param: &LweParam, pt: &LwePlaintext) -> LweCiphertext {
-        LweCiphertext(AVec::zero(param.n, param.q()), pt.0)
     }
 
     pub fn sk_encrypt(
         param: &LweParam,
         sk: &LweSecretKey,
-        pt: &LwePlaintext,
+        pt: LwePlaintext,
         rng: &mut impl RngCore,
     ) -> LweCiphertext {
         let a = AVec::sample_fq_uniform(param.n, param.q(), rng);
@@ -147,27 +148,15 @@ impl Lwe {
         LweCiphertext(a, b)
     }
 
-    pub fn decrypt(_: &LweParam, sk: &LweSecretKey, ct: &LweCiphertext) -> LwePlaintext {
+    pub fn decrypt(_: &LweParam, sk: &LweSecretKey, ct: LweCiphertext) -> LwePlaintext {
         let pt = ct.b() - ct.a().dot(&sk.0);
         LwePlaintext(pt)
-    }
-
-    pub fn eval_add(_: &LweParam, ct0: &LweCiphertext, ct1: &LweCiphertext) -> LweCiphertext {
-        LweCiphertext(ct0.a() + ct1.a(), ct0.b() + ct1.b())
-    }
-
-    pub fn eval_double(param: &LweParam, ct: &LweCiphertext) -> LweCiphertext {
-        Lwe::eval_add(param, ct, ct)
-    }
-
-    pub fn eval_sub(_: &LweParam, ct0: &LweCiphertext, ct1: &LweCiphertext) -> LweCiphertext {
-        LweCiphertext(ct0.a() - ct1.a(), ct0.b() - ct1.b())
     }
 
     pub fn key_switch(
         param: &LweParam,
         ksk: &LweKeySwitchingKey,
-        ct: &LweCiphertext,
+        ct: LweCiphertext,
     ) -> LweCiphertext {
         let ct_a_limbs = chain![ct.a()]
             .flat_map(|a| param.decomposor().decompose(a))
@@ -195,9 +184,9 @@ mod test {
         let sk = Lwe::key_gen(&param, &mut rng);
         for m in 0..param.p() {
             let m = Fq::from_u64(param.p(), m);
-            let pt = Lwe::encode(&param, &m);
-            let ct = Lwe::sk_encrypt(&param, &sk, &pt, &mut rng);
-            assert_eq!(m, Lwe::decode(&param, &Lwe::decrypt(&param, &sk, &ct)));
+            let pt = Lwe::encode(&param, m);
+            let ct = Lwe::sk_encrypt(&param, &sk, pt, &mut rng);
+            assert_eq!(m, Lwe::decode(&param, Lwe::decrypt(&param, &sk, ct)));
         }
     }
 
@@ -209,11 +198,11 @@ mod test {
         let sk = Lwe::key_gen(&param, &mut rng);
         for (m0, m1) in (0..param.p()).cartesian_product(0..param.p()) {
             let [m0, m1] = [m0, m1].map(|m| Fq::from_u64(param.p(), m));
-            let [pt0, pt1] = [m0, m1].map(|m| Lwe::encode(&param, &m));
-            let [ct0, ct1] = [pt0, pt1].map(|pt| Lwe::sk_encrypt(&param, &sk, &pt, &mut rng));
-            let ct2 = Lwe::eval_add(&param, &ct0, &ct1);
+            let [pt0, pt1] = [m0, m1].map(|m| Lwe::encode(&param, m));
+            let [ct0, ct1] = [pt0, pt1].map(|pt| Lwe::sk_encrypt(&param, &sk, pt, &mut rng));
+            let ct2 = ct0 + ct1;
             let m2 = m0 + m1;
-            assert_eq!(m2, Lwe::decode(&param, &Lwe::decrypt(&param, &sk, &ct2)));
+            assert_eq!(m2, Lwe::decode(&param, Lwe::decrypt(&param, &sk, ct2)));
         }
     }
 
@@ -225,11 +214,11 @@ mod test {
         let sk = Lwe::key_gen(&param, &mut rng);
         for (m0, m1) in (0..param.p()).cartesian_product(0..param.p()) {
             let [m0, m1] = [m0, m1].map(|m| Fq::from_u64(param.p(), m));
-            let [pt0, pt1] = [m0, m1].map(|m| Lwe::encode(&param, &m));
-            let [ct0, ct1] = [pt0, pt1].map(|pt| Lwe::sk_encrypt(&param, &sk, &pt, &mut rng));
-            let ct2 = Lwe::eval_sub(&param, &ct0, &ct1);
+            let [pt0, pt1] = [m0, m1].map(|m| Lwe::encode(&param, m));
+            let [ct0, ct1] = [pt0, pt1].map(|pt| Lwe::sk_encrypt(&param, &sk, pt, &mut rng));
+            let ct2 = ct0 - ct1;
             let m2 = m0 - m1;
-            assert_eq!(m2, Lwe::decode(&param, &Lwe::decrypt(&param, &sk, &ct2)));
+            assert_eq!(m2, Lwe::decode(&param, Lwe::decrypt(&param, &sk, ct2)));
         }
     }
 
@@ -244,10 +233,10 @@ mod test {
         let ksk = Lwe::ksk_gen(&param1, &sk1, &sk0, &mut rng);
         for m in 0..param0.p() {
             let m = Fq::from_u64(param0.p(), m);
-            let pt = Lwe::encode(&param0, &m);
-            let ct0 = Lwe::sk_encrypt(&param0, &sk0, &pt, &mut rng);
-            let ct1 = Lwe::key_switch(&param1, &ksk, &ct0);
-            assert_eq!(m, Lwe::decode(&param1, &Lwe::decrypt(&param1, &sk1, &ct1)));
+            let pt = Lwe::encode(&param0, m);
+            let ct0 = Lwe::sk_encrypt(&param0, &sk0, pt, &mut rng);
+            let ct1 = Lwe::key_switch(&param1, &ksk, ct0);
+            assert_eq!(m, Lwe::decode(&param1, Lwe::decrypt(&param1, &sk1, ct1)));
         }
     }
 }

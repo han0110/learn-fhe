@@ -3,15 +3,16 @@ use core::{
     borrow::Borrow,
     fmt::{self, Display, Formatter},
     iter::{repeat_with, Sum},
-    ops::{AddAssign, Deref, DerefMut, MulAssign, Neg, SubAssign},
+    ops::AddAssign,
     slice,
 };
+use derive_more::{Deref, DerefMut, From, Into};
 use itertools::izip;
 use rand::RngCore;
 use rand_distr::Distribution;
 use std::vec;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Deref, DerefMut, From, Into)]
 pub struct AVec<T>(Vec<T>);
 
 impl<T> AVec<T> {
@@ -49,20 +50,6 @@ impl AVec<Fq> {
     }
 }
 
-impl<T> Deref for AVec<T> {
-    type Target = Vec<T>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<T> DerefMut for AVec<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
 impl<T> Default for AVec<T> {
     fn default() -> Self {
         Self(Vec::new())
@@ -80,20 +67,8 @@ impl<T: Display> Display for AVec<T> {
     }
 }
 
-impl<T> From<AVec<T>> for Vec<T> {
-    fn from(value: AVec<T>) -> Self {
-        value.0
-    }
-}
-
-impl<T> From<Vec<T>> for AVec<T> {
-    fn from(value: Vec<T>) -> Self {
-        Self(value)
-    }
-}
-
-impl<'a, T: Clone> From<&'a [T]> for AVec<T> {
-    fn from(value: &'a [T]) -> Self {
+impl<T: Clone> From<&[T]> for AVec<T> {
+    fn from(value: &[T]) -> Self {
         Self(value.into())
     }
 }
@@ -137,58 +112,6 @@ impl<'a, T> IntoIterator for &'a mut AVec<T> {
     }
 }
 
-impl<T> Neg for AVec<T>
-where
-    for<'t> &'t T: Neg<Output = T>,
-{
-    type Output = AVec<T>;
-
-    fn neg(mut self) -> Self::Output {
-        self.iter_mut().for_each(|value| *value = value.neg());
-        self
-    }
-}
-
-impl<T> Neg for &AVec<T>
-where
-    for<'t> &'t T: Neg<Output = T>,
-{
-    type Output = AVec<T>;
-
-    fn neg(self) -> Self::Output {
-        self.iter().map(|value| value.neg()).collect()
-    }
-}
-
-impl<T> AddAssign<&AVec<T>> for AVec<T>
-where
-    for<'t> T: AddAssign<&'t T>,
-{
-    fn add_assign(&mut self, rhs: &AVec<T>) {
-        assert_eq!(self.len(), rhs.len());
-        izip!(&mut self.0, &rhs.0).for_each(|(lhs, rhs)| *lhs += rhs);
-    }
-}
-
-impl<T> SubAssign<&AVec<T>> for AVec<T>
-where
-    for<'t> T: SubAssign<&'t T>,
-{
-    fn sub_assign(&mut self, rhs: &AVec<T>) {
-        assert_eq!(self.len(), rhs.len());
-        izip!(&mut self.0, &rhs.0).for_each(|(lhs, rhs)| *lhs -= rhs);
-    }
-}
-
-impl<T> MulAssign<&T> for AVec<T>
-where
-    for<'t> T: MulAssign<&'t T>,
-{
-    fn mul_assign(&mut self, rhs: &T) {
-        self.iter_mut().for_each(|value| *value *= rhs);
-    }
-}
-
 impl<T, Item> Sum<Item> for AVec<T>
 where
     T: Clone + for<'t> AddAssign<&'t T>,
@@ -196,51 +119,143 @@ where
 {
     fn sum<I: Iterator<Item = Item>>(mut iter: I) -> Self {
         let init = iter.next().unwrap().borrow().clone();
-        iter.fold(init, |acc, item| acc + item.borrow())
+        iter.fold(init, |mut acc, item| {
+            acc += item.borrow();
+            acc
+        })
     }
 }
 
-macro_rules! impl_ops {
-    (@ impl<T$(: $generic:ty)?> $trait:ident<$rhs:ty> for $lhs:ty; type Output = $out:ty; $lhs_convert:expr) => {
+macro_rules! impl_element_wise_op_assign {
+    (@ impl<T> $trait:ident<$rhs:ty> for $lhs:ty; for<$life:lifetime> $t:ty: $constraint:tt) => {
         paste::paste! {
-            impl<T $(: $generic)?> core::ops::$trait<$rhs> for $lhs
+            impl<T> core::ops::$trait<$rhs> for $lhs
             where
-                for<'t> T: [<$trait Assign>]<&'t T>,
+                for<$life> $t: $constraint,
             {
-                type Output = $out;
-
-                fn [<$trait:lower>](self, rhs: $rhs) -> $out {
-                    let mut lhs = $lhs_convert(self);
-                    lhs.[<$trait:lower _assign>](rhs.borrow());
-                    lhs
+                fn [<$trait:snake:lower>](&mut self, rhs: $rhs) {
+                    assert_eq!(self.len(), rhs.len());
+                    izip!(self, rhs).for_each(|(lhs, rhs)| lhs.[<$trait:snake:lower>](rhs));
                 }
             }
         }
     };
     ($(impl<T> $trait:ident<$rhs:ty> for $lhs:ty),* $(,)?) => {
         $(
-            paste::paste! {
-                impl<T> core::ops::[<$trait Assign>]<$rhs> for $lhs
-                where
-                    for<'t> T: [<$trait Assign>]<&'t T>,
-                {
-                    fn [<$trait:lower _assign>](&mut self, rhs: $rhs) {
-                        self.[<$trait:lower _assign>](&rhs);
-                    }
-                }
-            }
-            impl_ops!(@ impl<T> $trait<$rhs> for $lhs; type Output = $lhs; core::convert::identity);
-            impl_ops!(@ impl<T> $trait<&$rhs> for $lhs; type Output = $lhs; core::convert::identity);
-            impl_ops!(@ impl<T: Clone> $trait<$rhs> for &$lhs; type Output = $lhs; <_>::clone);
-            impl_ops!(@ impl<T: Clone> $trait<&$rhs> for &$lhs; type Output = $lhs; <_>::clone);
+            impl_element_wise_op_assign!(@ impl<T> $trait<&$rhs> for $lhs; for<'t> T: (core::ops::$trait<&'t T>));
+            impl_element_wise_op_assign!(@ impl<T> $trait<$rhs> for $lhs; for<'t> T: (core::ops::$trait<T>));
         )*
-    };
+    }
 }
 
-impl_ops!(
+macro_rules! impl_element_wise_neg {
+    (@ impl<T> Neg for $lhs:ty; type Output = $out:ty; for<$life:lifetime> $t:ty: $constraint:tt) => {
+        impl<T> core::ops::Neg for $lhs
+        where
+            for<$life> $t: $constraint,
+        {
+            type Output = $out;
+
+            fn neg(self) -> Self::Output {
+                self.into_iter().map(|value| -value).collect()
+            }
+        }
+    };
+    ($(impl<T> Neg for $lhs:ty),* $(,)?) => {
+        $(
+            impl_element_wise_neg!(@ impl<T> Neg for $lhs; type Output = $lhs; for<'t> T: (core::ops::Neg<Output = T>));
+            impl_element_wise_neg!(@ impl<T> Neg for &$lhs; type Output = $lhs; for<'t> &'t T: (core::ops::Neg<Output = T>));
+        )*
+    }
+}
+
+macro_rules! impl_element_wise_op {
+    (@ impl<T> $trait:ident<$rhs:ty> for $lhs:ty; type Output = $out:ty; for<$life:lifetime> $t:ty: $constraint:tt) => {
+        paste::paste! {
+            impl<T> core::ops::$trait<$rhs> for $lhs
+            where
+                for<$life> $t: $constraint,
+            {
+                type Output = $out;
+
+                fn [<$trait:lower>](self, rhs: $rhs) -> Self::Output {
+                    assert_eq!(self.len(), rhs.len());
+                    izip!(self, rhs).map(|(lhs, rhs)| lhs.[<$trait:lower>](rhs)).collect()
+                }
+            }
+        }
+    };
+    ($(impl<T> $trait:ident<$rhs:ty> for $lhs:ty),* $(,)?) => {
+        $(
+            impl_element_wise_op!(@ impl<T> $trait<&$rhs> for $lhs; type Output = $lhs; for<'t> T: (core::ops::$trait<&'t T, Output = T>));
+            impl_element_wise_op!(@ impl<T> $trait<$rhs> for $lhs; type Output = $lhs; for<'t> T: (core::ops::$trait<T, Output = T>));
+            impl_element_wise_op!(@ impl<T> $trait<&$rhs> for &$lhs; type Output = $lhs; for<'t> &'t T: (core::ops::$trait<&'t T, Output = T>));
+            impl_element_wise_op!(@ impl<T> $trait<$rhs> for &$lhs; type Output = $lhs; for<'t> &'t T: (core::ops::$trait<T, Output = T>));
+        )*
+    }
+}
+
+macro_rules! impl_mul_assign_element {
+    (@ impl<T> MulAssign<$rhs:ty> for $lhs:ty; for<$life:lifetime> $t:ty: $constraint:tt) => {
+        impl<T> core::ops::MulAssign<$rhs> for $lhs
+        where
+            for<$life> $t: $constraint,
+        {
+            fn mul_assign(&mut self, rhs: $rhs) {
+                self.iter_mut().for_each(|lhs| lhs.mul_assign(&rhs));
+            }
+        }
+    };
+    ($(impl<T> MulAssign<$rhs:ty> for $lhs:ty),* $(,)?) => {
+        $(
+            impl_mul_assign_element!(@ impl<T> MulAssign<$rhs> for $lhs; for<'t> T: (core::ops::MulAssign<&'t T>));
+            impl_mul_assign_element!(@ impl<T> MulAssign<&$rhs> for $lhs; for<'t> T: (core::ops::MulAssign<&'t T>));
+        )*
+    }
+}
+
+macro_rules! impl_mul_element {
+    (@ impl<T> Mul<$rhs:ty> for $lhs:ty; type Output = $out:ty; for<$life:lifetime> $t:ty: $constraint:tt) => {
+        impl<T> core::ops::Mul<$rhs> for $lhs
+        where
+            for<$life> $t: $constraint,
+        {
+            type Output = $out;
+
+            fn mul(self, rhs: $rhs) -> Self::Output {
+                self.into_iter().map(|lhs| lhs.mul(&rhs)).collect()
+            }
+        }
+    };
+    ($(impl<T> Mul<$rhs:ty> for $lhs:ty),* $(,)?) => {
+        $(
+            impl_mul_element!(@ impl<T> Mul<$rhs> for $lhs; type Output = $lhs; for<'t> T: (core::ops::Mul<&'t T, Output = T>));
+            impl_mul_element!(@ impl<T> Mul<&$rhs> for $lhs; type Output = $lhs; for<'t> T: (core::ops::Mul<&'t T, Output = T>));
+            impl_mul_element!(@ impl<T> Mul<$rhs> for &$lhs; type Output = $lhs; for<'t> &'t T: (core::ops::Mul<&'t T, Output = T>));
+            impl_mul_element!(@ impl<T> Mul<&$rhs> for &$lhs; type Output = $lhs; for<'t> &'t T: (core::ops::Mul<&'t T, Output = T>));
+        )*
+    }
+}
+
+impl_element_wise_neg!(
+    impl<T> Neg for AVec<T>,
+);
+impl_element_wise_op_assign!(
+    impl<T> AddAssign<AVec<T>> for AVec<T>,
+    impl<T> SubAssign<AVec<T>> for AVec<T>,
+);
+impl_element_wise_op!(
     impl<T> Add<AVec<T>> for AVec<T>,
     impl<T> Sub<AVec<T>> for AVec<T>,
+);
+impl_mul_assign_element!(
+    impl<T> MulAssign<T> for AVec<T>,
+);
+impl_mul_element!(
     impl<T> Mul<T> for AVec<T>,
 );
 
-pub(crate) use impl_ops;
+pub(crate) use {
+    impl_element_wise_neg, impl_element_wise_op, impl_element_wise_op_assign,
+    impl_mul_assign_element, impl_mul_element,
+};

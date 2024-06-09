@@ -1,5 +1,6 @@
 use core::{
     borrow::Borrow,
+    cmp::Ordering,
     fmt::{self, Display, Formatter},
     iter::{successors, Product, Sum},
     ops::{AddAssign, MulAssign, Neg, SubAssign},
@@ -127,14 +128,14 @@ impl From<&Fq> for f64 {
 }
 
 impl Ord for Fq {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> Ordering {
         assert_eq!(self.q, other.q);
         self.v.cmp(&other.v)
     }
 }
 
 impl PartialOrd for Fq {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
@@ -201,7 +202,7 @@ impl<T: Borrow<Fq>> Product<T> for Fq {
     }
 }
 
-macro_rules! impl_ops {
+macro_rules! impl_op {
     (@ impl $trait:ident<$rhs:ty> for $lhs:ty; $lhs_convert:expr) => {
         paste::paste! {
             impl core::ops::$trait<$rhs> for $lhs {
@@ -226,21 +227,21 @@ macro_rules! impl_ops {
                     }
                 }
             }
-            impl_ops!(@ impl $trait<$rhs> for $lhs; core::convert::identity);
-            impl_ops!(@ impl $trait<&$rhs> for $lhs; core::convert::identity);
-            impl_ops!(@ impl $trait<$rhs> for &$lhs; <_>::clone);
-            impl_ops!(@ impl $trait<&$rhs> for &$lhs; <_>::clone);
+            impl_op!(@ impl $trait<$rhs> for $lhs; core::convert::identity);
+            impl_op!(@ impl $trait<&$rhs> for $lhs; core::convert::identity);
+            impl_op!(@ impl $trait<$rhs> for &$lhs; <_>::clone);
+            impl_op!(@ impl $trait<&$rhs> for &$lhs; <_>::clone);
         )*
     };
 }
 
-impl_ops!(
+impl_op!(
     impl Add<Fq> for Fq,
     impl Sub<Fq> for Fq,
     impl Mul<Fq> for Fq,
 );
 
-macro_rules! impl_ops_with_primitive {
+macro_rules! impl_op_with_primitive {
     (@ impl $trait:ident<&$p:ty> for Fq) => {
         paste::paste! {
             impl core::ops::$trait<&$p> for Fq {
@@ -252,9 +253,7 @@ macro_rules! impl_ops_with_primitive {
         }
     };
     ($(impl $trait:ident<&$p:ty> for Fq),* $(,)?) => {
-        $(
-            impl_ops_with_primitive!(@ impl $trait<&$p> for Fq);
-        )*
+        $(impl_op_with_primitive!(@ impl $trait<&$p> for Fq);)*
     };
     ($($p1:ty $(as $p2:ty)?),* $(,)?) => {
         $(
@@ -277,12 +276,12 @@ macro_rules! impl_ops_with_primitive {
                     (&value).into()
                 }
             }
-            impl_ops_with_primitive!(
+            impl_op_with_primitive!(
                 impl AddAssign<&$p1> for Fq,
                 impl SubAssign<&$p1> for Fq,
                 impl MulAssign<&$p1> for Fq,
             );
-            impl_ops!(
+            impl_op!(
                 impl Add<$p1> for Fq,
                 impl Sub<$p1> for Fq,
                 impl Mul<$p1> for Fq,
@@ -291,7 +290,7 @@ macro_rules! impl_ops_with_primitive {
     };
 }
 
-impl_ops_with_primitive!(
+impl_op_with_primitive!(
     u64,
     i64,
     u32 as u64,

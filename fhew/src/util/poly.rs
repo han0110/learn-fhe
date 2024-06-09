@@ -1,20 +1,24 @@
 use crate::util::{
-    avec::{impl_ops, AVec},
+    avec::{
+        impl_element_wise_neg, impl_element_wise_op, impl_element_wise_op_assign,
+        impl_mul_assign_element, impl_mul_element, AVec,
+    },
     fq::{Fq, NEG_NTT_PSI},
 };
 use core::{
     borrow::Borrow,
     fmt::{self, Display, Formatter},
     iter::Sum,
-    ops::{AddAssign, BitXor, Deref, DerefMut, Mul, MulAssign, Neg, SubAssign},
+    ops::{AddAssign, BitXor, Mul, MulAssign, Neg},
     slice,
 };
+use derive_more::{Deref, DerefMut, From, Into};
 use itertools::izip;
 use rand::RngCore;
 use rand_distr::Distribution;
 use std::vec;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Deref, DerefMut, From, Into)]
 pub struct Poly<T>(AVec<T>);
 
 impl<T> Poly<T> {
@@ -83,20 +87,6 @@ impl Poly<Fq> {
     }
 }
 
-impl<T> Deref for Poly<T> {
-    type Target = Vec<T>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<T> DerefMut for Poly<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
 impl<T: Display> Display for Poly<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
@@ -115,21 +105,9 @@ impl<T> From<Vec<T>> for Poly<T> {
     }
 }
 
-impl<'a, T: Clone> From<&'a [T]> for Poly<T> {
-    fn from(value: &'a [T]) -> Self {
+impl<T: Clone> From<&[T]> for Poly<T> {
+    fn from(value: &[T]) -> Self {
         Self::new(value.into())
-    }
-}
-
-impl<T: Clone> From<AVec<T>> for Poly<T> {
-    fn from(value: AVec<T>) -> Self {
-        Self::new(value)
-    }
-}
-
-impl<T> From<Poly<T>> for AVec<T> {
-    fn from(value: Poly<T>) -> Self {
-        value.0
     }
 }
 
@@ -169,55 +147,6 @@ impl<'a, T> IntoIterator for &'a mut Poly<T> {
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter_mut()
-    }
-}
-
-impl<T> Neg for Poly<T>
-where
-    for<'t> &'t T: Neg<Output = T>,
-{
-    type Output = Poly<T>;
-
-    fn neg(self) -> Self::Output {
-        Poly(-self.0)
-    }
-}
-
-impl<T> Neg for &Poly<T>
-where
-    for<'t> &'t T: Neg<Output = T>,
-{
-    type Output = Poly<T>;
-
-    fn neg(self) -> Self::Output {
-        Poly(-&self.0)
-    }
-}
-
-impl<T> AddAssign<&Poly<T>> for Poly<T>
-where
-    for<'t> T: AddAssign<&'t T>,
-{
-    fn add_assign(&mut self, rhs: &Poly<T>) {
-        self.0 += &rhs.0;
-    }
-}
-
-impl<T> SubAssign<&Poly<T>> for Poly<T>
-where
-    for<'t> T: SubAssign<&'t T>,
-{
-    fn sub_assign(&mut self, rhs: &Poly<T>) {
-        self.0 -= &rhs.0;
-    }
-}
-
-impl<T> MulAssign<&T> for Poly<T>
-where
-    for<'t> T: MulAssign<&'t T>,
-{
-    fn mul_assign(&mut self, rhs: &T) {
-        self.0 *= rhs;
     }
 }
 
@@ -261,17 +190,32 @@ where
 {
     fn sum<I: Iterator<Item = Item>>(mut iter: I) -> Self {
         let init = iter.next().unwrap().borrow().0.clone();
-        Self(iter.fold(init, |acc, item| acc + &item.borrow().0))
+        Self(iter.fold(init, |mut acc, item| {
+            acc += &item.borrow().0;
+            acc
+        }))
     }
 }
 
-impl_ops!(
+impl_element_wise_neg!(
+    impl<T> Neg for Poly<T>,
+);
+impl_element_wise_op_assign!(
+    impl<T> AddAssign<Poly<T>> for Poly<T>,
+    impl<T> SubAssign<Poly<T>> for Poly<T>,
+);
+impl_element_wise_op!(
     impl<T> Add<Poly<T>> for Poly<T>,
     impl<T> Sub<Poly<T>> for Poly<T>,
+);
+impl_mul_assign_element!(
+    impl<T> MulAssign<T> for Poly<T>,
+);
+impl_mul_element!(
     impl<T> Mul<T> for Poly<T>,
 );
 
-macro_rules! impl_mul_ops {
+macro_rules! impl_poly_fq_mul {
     (@ impl Mul<$rhs:ty> for $lhs:ty; $lhs_convert:expr) => {
         impl core::ops::Mul<$rhs> for $lhs {
             type Output = Poly<Fq>;
@@ -283,28 +227,22 @@ macro_rules! impl_mul_ops {
             }
         }
     };
-    ($(impl Mul<$rhs:ty> for $lhs:ty),* $(,)?) => {
+    ($(impl Mul<$rhs:ty> for Poly<Fq>),* $(,)?) => {
         $(
-            impl core::ops::MulAssign<$rhs> for $lhs {
+            impl core::ops::MulAssign<$rhs> for Poly<Fq> {
                 fn mul_assign(&mut self, rhs: $rhs) {
                     *self *= &rhs;
                 }
             }
-            impl_mul_ops!(@ impl Mul<$rhs> for $lhs; core::convert::identity);
-            impl_mul_ops!(@ impl Mul<&$rhs> for $lhs; core::convert::identity);
-            impl_mul_ops!(@ impl Mul<$rhs> for &$lhs; <_>::clone);
-            impl_mul_ops!(@ impl Mul<&$rhs> for &$lhs; <_>::clone);
+            impl_poly_fq_mul!(@ impl Mul<$rhs> for Poly<Fq>; core::convert::identity);
+            impl_poly_fq_mul!(@ impl Mul<&$rhs> for Poly<Fq>; core::convert::identity);
+            impl_poly_fq_mul!(@ impl Mul<$rhs> for &Poly<Fq>; <_>::clone);
+            impl_poly_fq_mul!(@ impl Mul<&$rhs> for &Poly<Fq>; <_>::clone);
         )*
     }
 }
 
-impl_mul_ops!(
-    impl Mul<Poly<Fq>> for Poly<Fq>,
-    impl Mul<Poly<i8>> for Poly<Fq>,
-    impl Mul<Monomial> for Poly<Fq>,
-);
-
-macro_rules! impl_mul_ops_from_i8 {
+macro_rules! impl_poly_i8_mul {
     (@ impl Mul<$rhs:ty> for $lhs:ty) => {
         impl core::ops::Mul<$rhs> for $lhs {
             type Output = Poly<Fq>;
@@ -314,14 +252,23 @@ macro_rules! impl_mul_ops_from_i8 {
             }
         }
     };
-    ($rhs:ty) => {
-        impl_mul_ops_from_i8!(@ impl Mul<$rhs> for Poly<i8>);
-        impl_mul_ops_from_i8!(@ impl Mul<&$rhs> for Poly<i8>);
-        impl_mul_ops_from_i8!(@ impl Mul<$rhs> for &Poly<i8>);
+    ($(impl Mul<$rhs:ty> for Poly<i8>),* $(,)?) => {
+        $(
+            impl_poly_i8_mul!(@ impl Mul<$rhs> for Poly<i8>);
+            impl_poly_i8_mul!(@ impl Mul<&$rhs> for Poly<i8>);
+            impl_poly_i8_mul!(@ impl Mul<$rhs> for &Poly<i8>);
+        )*
     }
 }
 
-impl_mul_ops_from_i8!(Fq);
+impl_poly_fq_mul!(
+    impl Mul<Poly<Fq>> for Poly<Fq>,
+    impl Mul<Poly<i8>> for Poly<Fq>,
+    impl Mul<Monomial> for Poly<Fq>,
+);
+impl_poly_i8_mul!(
+    impl Mul<Fq> for Poly<i8>,
+);
 
 pub struct Monomial(i64);
 

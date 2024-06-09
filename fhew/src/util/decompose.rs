@@ -1,8 +1,6 @@
-use std::iter::repeat_with;
-
-use itertools::Itertools;
-
 use crate::util::Fq;
+use core::iter::repeat_with;
+use itertools::Itertools;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Decomposor {
