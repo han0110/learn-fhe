@@ -17,12 +17,17 @@ pub struct FhewBit(LweCiphertext);
 
 impl Fhew {
     fn encode(param: &BoostrapingParam, m: bool) -> LwePlaintext {
+        assert_eq!(param.p(), 4);
+
         Lwe::encode(param.lwe_z(), Fq::from_i8(param.p(), m as i8))
     }
 
     fn decode(param: &BoostrapingParam, pt: LwePlaintext) -> bool {
+        assert_eq!(param.p(), 4);
+
         let m = u64::from(Lwe::decode(param.lwe_z(), pt));
         assert!(m == 0 || m == 1);
+
         m == 1
     }
 

@@ -194,7 +194,7 @@ impl Rlwe {
         Rlwe::key_switch(param, ak, ct_auto)
     }
 
-    pub fn sample_extract(param: &RlweParam, ct: &RlweCiphertext, i: usize) -> LweCiphertext {
+    pub fn sample_extract(param: &RlweParam, ct: RlweCiphertext, i: usize) -> LweCiphertext {
         assert!(i < param.n());
         let a = chain![
             ct.a()[..i + 1].iter().rev().copied(),
@@ -324,7 +324,7 @@ pub(crate) mod test {
             let pt = Rlwe::encode(&param, m.clone());
             let ct = Rlwe::pk_encrypt(&param, &pk, pt, &mut rng);
             for i in 0..param.n() {
-                let ct = Rlwe::sample_extract(&param, &ct, i);
+                let ct = Rlwe::sample_extract(&param, ct.clone(), i);
                 assert_eq!(m[i], Lwe::decode(&param, Lwe::decrypt(&param, &sk, ct)));
             }
         }

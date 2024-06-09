@@ -23,7 +23,6 @@ pub struct BoostrapingParam {
 
 impl BoostrapingParam {
     pub fn new(rgsw: RgswParam, lwe_s: LweParam, w: usize) -> Self {
-        assert_eq!(rgsw.p(), 4);
         let lwe_z = LweParam::new(rgsw.q(), rgsw.p(), rgsw.n());
         Self {
             rgsw,
@@ -46,7 +45,7 @@ impl BoostrapingParam {
     }
 
     pub fn p(&self) -> u64 {
-        4
+        self.lwe_z.p()
     }
 
     pub fn big_q(&self) -> u64 {
@@ -118,58 +117,60 @@ impl Boostraping {
         let ct = ct.mod_switch(param.big_q_ks());
         let ct = Lwe::key_switch(param.lwe_s(), &bk.ksk, ct);
         let ct = ct.mod_switch_odd(param.q());
-        let ct = Boostraping::blind_rotate(param, bk, f, ct);
-        Rlwe::sample_extract(param.rgsw(), &ct, 0)
+        let ct = Boostraping::blind_rotate(param, &bk.brk, &bk.ak, f, ct);
+        Rlwe::sample_extract(param.rgsw(), ct, 0)
     }
 
     // Algorithm 7 in 2022/198.
     fn blind_rotate(
         param: &BoostrapingParam,
-        bk: &BoostrapingKey,
+        brk: &[RgswCiphertext],
+        ak: &[RlweAutoKey],
         f: &Poly<Fq>,
-        ct: LweCiphertext,
+        LweCiphertext(a, b): LweCiphertext,
     ) -> RlweCiphertext {
         let g = Rlwe::AUTO_G;
-        let f_prime = f.automorphism(-g) * (X ^ (ct.b() * g));
+        let f_prime = f.automorphism(-g) * (X ^ (b * g));
         let acc = RlwePlaintext(f_prime).into();
-        Boostraping::blind_rotate_core(param, bk, ct.a(), acc)
+        Boostraping::blind_rotate_core(param, brk, ak, a, acc)
     }
 
     // Algorithm 3 in 2022/198.
     fn blind_rotate_core(
         param: &BoostrapingParam,
-        bk: &BoostrapingKey,
-        a: &AVec<Fq>,
+        brk: &[RgswCiphertext],
+        ak: &[RlweAutoKey],
+        a: AVec<Fq>,
         mut acc: RlweCiphertext,
     ) -> RlweCiphertext {
-        let (i_minus, i_plus) = i_minus_i_plus(param.q(), a);
+        let (i_minus, i_plus) = i_minus_i_plus(param.q(), &a);
         let mut v = 0;
         for l in (1..i_minus.len()).rev() {
             for j in &i_minus[l] {
-                acc = Rgsw::external_product(param.rgsw(), &bk.brk[*j], acc);
+                acc = Rgsw::external_product(param.rgsw(), &brk[*j], acc);
             }
             v += 1;
             if !i_minus[l - 1].is_empty() || v == param.w || l == 1 {
-                acc = Rlwe::automorphism(param.rgsw(), &bk.ak[v], acc);
+                acc = Rlwe::automorphism(param.rgsw(), &ak[v], acc);
                 v = 0
             }
         }
         for j in &i_minus[0] {
-            acc = Rgsw::external_product(param.rgsw(), &bk.brk[*j], acc);
+            acc = Rgsw::external_product(param.rgsw(), &brk[*j], acc);
         }
-        acc = Rlwe::automorphism(param.rgsw(), &bk.ak[0], acc);
+        acc = Rlwe::automorphism(param.rgsw(), &ak[0], acc);
         for l in (1..i_plus.len()).rev() {
             for j in &i_plus[l] {
-                acc = Rgsw::external_product(param.rgsw(), &bk.brk[*j], acc);
+                acc = Rgsw::external_product(param.rgsw(), &brk[*j], acc);
             }
             v += 1;
             if !i_plus[l - 1].is_empty() || v == param.w || l == 1 {
-                acc = Rlwe::automorphism(param.rgsw(), &bk.ak[v], acc);
+                acc = Rlwe::automorphism(param.rgsw(), &ak[v], acc);
                 v = 0
             }
         }
         for j in &i_plus[0] {
-            acc = Rgsw::external_product(param.rgsw(), &bk.brk[*j], acc);
+            acc = Rgsw::external_product(param.rgsw(), &brk[*j], acc);
         }
         acc
     }
