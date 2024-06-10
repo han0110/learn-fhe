@@ -72,7 +72,7 @@ impl Fhew {
 }
 
 macro_rules! impl_op {
-    (@ $op:ident, $table:expr, |$ct0:ident, $ct1:ident $(, $ct2:ident)?| $preprocess:expr) => {
+    (@ $op:ident, $table:expr, |$ct0:ident, $ct1:ident $(, $ct2:ident)?| $lin:expr) => {
         impl Fhew {
             pub fn $op(
                 param: &BoostrapingParam,
@@ -81,12 +81,12 @@ macro_rules! impl_op {
                 FhewBit($ct1): FhewBit,
                 $(FhewBit($ct2): FhewBit,)?
             ) -> FhewBit {
-                Fhew::op(param, bk, $table, $preprocess)
+                Fhew::op(param, bk, $table, $lin)
             }
         }
     };
-    ($($op:ident, $table:expr, |$ct0:ident, $ct1:ident $(, $ct2:ident)?| $preprocess:expr);* $(;)?) => {
-        $(impl_op!(@ $op, $table, |$ct0, $ct1 $(, $ct2)?| $preprocess);)*
+    ($($op:ident, $table:expr, |$ct0:ident, $ct1:ident $(, $ct2:ident)?| $lin:expr);* $(;)?) => {
+        $(impl_op!(@ $op, $table, |$ct0, $ct1 $(, $ct2)?| $lin);)*
     }
 }
 
@@ -132,29 +132,26 @@ mod test {
             let w = 10;
             BoostrapingParam::new(rgsw, lwe, w)
         };
-        let z = Lwe::key_gen(param.lwe_z(), &mut rng);
-        let bk = {
-            let s = Lwe::key_gen(param.lwe_s(), &mut rng);
-            Boostraping::key_gen(&param, &z, &s, &mut rng)
-        };
+        let sk = Lwe::key_gen(param.lwe_z(), &mut rng);
+        let bk = Boostraping::key_gen(&param, &sk, &mut rng);
 
         macro_rules! assert_correct_op {
             ($op:ident($ct0:ident $(, $ct1:ident $(, $ct2:ident)?)?) == $output:expr) => {
                 assert_eq!(
                     $output,
-                    Fhew::decrypt(&param, &z, Fhew::$op(&param, &bk, $ct0.clone() $(, $ct1.clone() $(, $ct2.clone())?)?))
+                    Fhew::decrypt(&param, &sk, Fhew::$op(&param, &bk, $ct0.clone() $(, $ct1.clone() $(, $ct2.clone())?)?))
                 )
             };
         }
 
         for m in 0..1 << 1 {
             let m = m == 1;
-            let ct = Fhew::sk_encrypt(&param, &z, m, &mut rng);
+            let ct = Fhew::sk_encrypt(&param, &sk, m, &mut rng);
             assert_correct_op!(not(ct) == !m);
         }
         for m in 0..1 << 2 {
             let [m0, m1] = from_fn(|i| (m >> i) & 1 == 1);
-            let [ct0, ct1] = [m0, m1].map(|m| Fhew::sk_encrypt(&param, &z, m, &mut rng));
+            let [ct0, ct1] = [m0, m1].map(|m| Fhew::sk_encrypt(&param, &sk, m, &mut rng));
             assert_correct_op!(and(ct0, ct1) == m0 & m1);
             assert_correct_op!(nand(ct0, ct1) == !(m0 & m1));
             assert_correct_op!(or(ct0, ct1) == m0 | m1);
@@ -164,7 +161,7 @@ mod test {
         }
         for m in 0..1 << 3 {
             let [m0, m1, m2] = from_fn(|i| (m >> i) & 1 == 1);
-            let [ct0, ct1, ct2] = [m0, m1, m2].map(|m| Fhew::sk_encrypt(&param, &z, m, &mut rng));
+            let [ct0, ct1, ct2] = [m0, m1, m2].map(|m| Fhew::sk_encrypt(&param, &sk, m, &mut rng));
             assert_correct_op!(majority(ct0, ct1, ct2) == (m0 & m1) | (m1 & m2) | (m2 & m0));
         }
     }

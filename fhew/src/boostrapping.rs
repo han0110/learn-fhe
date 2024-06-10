@@ -3,7 +3,7 @@
 use crate::{
     lwe::{Lwe, LweCiphertext, LweKeySwitchingKey, LweParam, LweSecretKey},
     rgsw::{Rgsw, RgswCiphertext, RgswParam, RgswPlaintext},
-    rlwe::{Rlwe, RlweAutoKey, RlweCiphertext, RlwePlaintext, RlweSecretKey},
+    rlwe::{Rlwe, RlweAutoKey, RlweCiphertext, RlwePlaintext},
     util::{AVec, Fq, Poly, X},
 };
 use itertools::{chain, izip};
@@ -48,6 +48,10 @@ impl BoostrapingParam {
         self.lwe_z.p()
     }
 
+    pub fn n(&self) -> usize {
+        self.rgsw().n()
+    }
+
     pub fn big_q(&self) -> u64 {
         self.rgsw().q()
     }
@@ -65,11 +69,15 @@ impl BoostrapingParam {
     }
 
     pub fn q(&self) -> u64 {
-        2 * self.rgsw().n() as u64
+        2 * self.n() as u64
     }
 
     pub fn q_by_8(&self) -> usize {
         self.q() as usize / 8
+    }
+
+    pub fn w(&self) -> usize {
+        self.w
     }
 }
 
@@ -84,24 +92,21 @@ impl Boostraping {
     pub fn key_gen(
         param: &BoostrapingParam,
         z: &LweSecretKey,
-        s: &LweSecretKey,
         rng: &mut impl RngCore,
     ) -> BoostrapingKey {
-        let ksk = Lwe::ksk_gen(param.lwe_s(), s, z, rng);
-        let z = RlweSecretKey::from(z);
+        let s = Lwe::key_gen(param.lwe_s(), rng);
+        let ksk = Lwe::ksk_gen(param.lwe_s(), &s, z, rng);
         let brk = {
-            let param = param.rgsw();
-            let one = &Poly::one(param.n(), param.q());
+            let one = &Poly::one(param.n(), param.big_q());
             s.0.iter()
-                .map(|si| one * (X ^ si))
-                .map(|pt| Rgsw::sk_encrypt(param, &z, RgswPlaintext(pt), rng))
+                .map(|sj| one * (X ^ sj))
+                .map(|pt| Rgsw::sk_encrypt(param.rgsw(), &z.into(), RgswPlaintext(pt), rng))
                 .collect()
         };
         let ak = {
-            let (param, q, w) = (param.rgsw(), param.q() as i64, param.w);
-            let g = Rlwe::AUTO_G;
-            chain![[-g], (1..).map(|exp| g.pow(exp) % q).take(w)]
-                .map(|t| Rlwe::ak_gen(param, &z, t, rng))
+            let g = Fq::from_i64(2 * param.n() as u64, Rlwe::AUTO_G);
+            chain![[-g], g.powers().skip(1).take(param.w())]
+                .map(|t| Rlwe::ak_gen(param.rgsw(), &z.into(), t.into(), rng))
                 .collect()
         };
         BoostrapingKey { ksk, brk, ak }
@@ -143,7 +148,7 @@ impl Boostraping {
         a: AVec<Fq>,
         mut acc: RlweCiphertext,
     ) -> RlweCiphertext {
-        let (i_minus, i_plus) = i_minus_i_plus(param.q(), &a);
+        let (i_minus, i_plus) = i_minus_i_plus(param.n(), &a);
         let mut v = 0;
         for l in (1..i_minus.len()).rev() {
             for j in &i_minus[l] {
@@ -176,10 +181,10 @@ impl Boostraping {
     }
 }
 
-fn i_minus_i_plus(q: u64, a: &AVec<Fq>) -> (Vec<Vec<usize>>, Vec<Vec<usize>>) {
-    let (log_map_g_minus, log_map_g_plus) = (log_g_map(q, -1), log_g_map(q, 1));
+fn i_minus_i_plus(n: usize, a: &AVec<Fq>) -> (Vec<Vec<usize>>, Vec<Vec<usize>>) {
+    let (log_map_g_minus, log_map_g_plus) = (log_g_map(n, -1), log_g_map(n, 1));
     izip!(0.., a).fold(
-        (vec![vec![]; q as usize / 4], vec![vec![]; q as usize / 4]),
+        (vec![vec![]; n / 2], vec![vec![]; n / 2]),
         |(mut i_minus, mut i_plus), (i, ai)| {
             match (log_map_g_minus.get(ai), log_map_g_plus.get(ai)) {
                 (Some(l), None) => i_minus[*l].push(i),
@@ -192,7 +197,7 @@ fn i_minus_i_plus(q: u64, a: &AVec<Fq>) -> (Vec<Vec<usize>>, Vec<Vec<usize>>) {
     )
 }
 
-fn log_g_map(q: u64, sign: i64) -> HashMap<Fq, usize> {
-    let g = Fq::from_i64(q, Rlwe::AUTO_G);
-    izip!(g.powers().map(|g| g * sign), 0..q as usize / 4).collect()
+fn log_g_map(n: usize, sign: i64) -> HashMap<Fq, usize> {
+    let g = Fq::from_i64(2 * n as u64, Rlwe::AUTO_G);
+    izip!(g.powers().map(|g| g * sign), 0..n / 2).collect()
 }
