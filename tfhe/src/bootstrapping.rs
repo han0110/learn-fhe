@@ -8,25 +8,25 @@ use core::num::Wrapping;
 use itertools::chain;
 use rand::RngCore;
 
-pub struct Boostrapping;
+pub struct Bootstrapping;
 
-pub struct BoostrappingParam {
+pub struct BootstrappingParam {
     tlwe: TlweParam,
     tggsw: TggswParam,
     log_b: usize,
     ell: usize,
 }
 
-pub struct BoostrappingKey(Vec<TggswCiphertext>, AdditiveVec<AdditiveVec<W64>>);
+pub struct BootstrappingKey(Vec<TggswCiphertext>, AdditiveVec<AdditiveVec<W64>>);
 
-impl Boostrapping {
+impl Bootstrapping {
     pub fn param_gen(
         tlwe: TlweParam,
         tggsw: TggswParam,
         log_b: usize,
         ell: usize,
-    ) -> BoostrappingParam {
-        BoostrappingParam {
+    ) -> BootstrappingParam {
+        BootstrappingParam {
             tlwe,
             tggsw,
             log_b,
@@ -35,13 +35,13 @@ impl Boostrapping {
     }
 
     pub fn key_gen(
-        param: &BoostrappingParam,
+        param: &BootstrappingParam,
         sk1: &TlweSecretKey,
         pk1: &TlwePublicKey,
         sk2: &TggswSecretKey,
         pk2: &TggswPublicKey,
         rng: &mut impl RngCore,
-    ) -> BoostrappingKey {
+    ) -> BootstrappingKey {
         let k1 = {
             let param = &param.tggsw;
             sk1.0
@@ -65,12 +65,12 @@ impl Boostrapping {
                 })
                 .collect()
         };
-        BoostrappingKey(k1, k2)
+        BootstrappingKey(k1, k2)
     }
 
-    pub fn boostrap(
-        param: &BoostrappingParam,
-        bsk: &BoostrappingKey,
+    pub fn bootstrap(
+        param: &BootstrappingParam,
+        bsk: &BootstrappingKey,
         v: &Polynomial<W64>,
         ct: &TlweCiphertext,
     ) -> TlweCiphertext {
@@ -102,7 +102,7 @@ impl Boostrapping {
 #[cfg(test)]
 mod test {
     use crate::{
-        boostrapping::Boostrapping,
+        bootstrapping::Bootstrapping,
         tggsw::Tggsw,
         tglwe::Tglwe,
         tlwe::Tlwe,
@@ -139,7 +139,7 @@ mod test {
     }
 
     #[test]
-    fn boostrap() {
+    fn bootstrap() {
         let mut rng = StdRng::seed_from_u64(OsRng.next_u64());
         let (log_q, log_p, padding, k, n, m, std_dev, log_b, ell) =
             (32, 3, 1, 1, 256, 32, 1.0e-8, 4, 8);
@@ -151,13 +151,13 @@ mod test {
             ell,
         );
         let (sk2, pk2) = Tggsw::key_gen(&param2, &mut rng);
-        let param3 = Boostrapping::param_gen(param1, param2, log_b, ell);
-        let bsk = Boostrapping::key_gen(&param3, &sk1, &pk1, &sk2, &pk2, &mut rng);
+        let param3 = Bootstrapping::param_gen(param1, param2, log_b, ell);
+        let bsk = Bootstrapping::key_gen(&param3, &sk1, &pk1, &sk2, &pk2, &mut rng);
         for f in [identity, plus_3, double, parity] {
             let v = programmable_poly(log_p, n, &f);
             for m in (0..1 << log_p).map(Wrapping) {
                 let ct1 = Tlwe::encrypt(&param1, &pk1, &Tlwe::encode(&param1, &m), &mut rng);
-                let ct2 = Boostrapping::boostrap(&param3, &bsk, &v, &ct1);
+                let ct2 = Bootstrapping::bootstrap(&param3, &bsk, &v, &ct1);
                 assert_eq!(
                     f(m) % param1.p(),
                     Tlwe::decode(&param1, &Tlwe::decrypt(&param1, &sk1, &ct2)),

@@ -11,17 +11,17 @@ use rand::RngCore;
 use std::collections::HashMap;
 
 #[derive(Debug)]
-pub struct Boostraping;
+pub struct Bootstrapping;
 
 #[derive(Clone, Copy, Debug)]
-pub struct BoostrapingParam {
+pub struct BootstrappingParam {
     rgsw: RgswParam,
     lwe_z: LweParam,
     lwe_s: LweParam,
     w: usize,
 }
 
-impl BoostrapingParam {
+impl BootstrappingParam {
     pub fn new(rgsw: RgswParam, lwe_s: LweParam, w: usize) -> Self {
         let lwe_z = LweParam::new(rgsw.q(), rgsw.p(), rgsw.n());
         Self {
@@ -82,18 +82,18 @@ impl BoostrapingParam {
 }
 
 #[derive(Clone, Debug)]
-pub struct BoostrapingKey {
+pub struct BootstrappingKey {
     ksk: LweKeySwitchingKey,
     brk: Vec<RgswCiphertext>,
     ak: Vec<RlweAutoKey>,
 }
 
-impl Boostraping {
+impl Bootstrapping {
     pub fn key_gen(
-        param: &BoostrapingParam,
+        param: &BootstrappingParam,
         z: &LweSecretKey,
         rng: &mut impl RngCore,
-    ) -> BoostrapingKey {
+    ) -> BootstrappingKey {
         let s = Lwe::key_gen(param.lwe_s(), rng);
         let ksk = Lwe::ksk_gen(param.lwe_s(), &s, z, rng);
         let brk = {
@@ -109,26 +109,26 @@ impl Boostraping {
                 .map(|t| Rlwe::ak_gen(param.rgsw(), &z.into(), t.into(), rng))
                 .collect()
         };
-        BoostrapingKey { ksk, brk, ak }
+        BootstrappingKey { ksk, brk, ak }
     }
 
     // Figure 2 in 2022/198.
-    pub fn boostrap(
-        param: &BoostrapingParam,
-        bk: &BoostrapingKey,
+    pub fn bootstrap(
+        param: &BootstrappingParam,
+        bk: &BootstrappingKey,
         f: &Poly<Fq>,
         ct: LweCiphertext,
     ) -> LweCiphertext {
         let ct = ct.mod_switch(param.big_q_ks());
         let ct = Lwe::key_switch(param.lwe_s(), &bk.ksk, ct);
         let ct = ct.mod_switch_odd(param.q());
-        let ct = Boostraping::blind_rotate(param, &bk.brk, &bk.ak, f, ct);
+        let ct = Bootstrapping::blind_rotate(param, &bk.brk, &bk.ak, f, ct);
         Rlwe::sample_extract(param.rgsw(), ct, 0)
     }
 
     // Algorithm 7 in 2022/198.
     fn blind_rotate(
-        param: &BoostrapingParam,
+        param: &BootstrappingParam,
         brk: &[RgswCiphertext],
         ak: &[RlweAutoKey],
         f: &Poly<Fq>,
@@ -137,12 +137,12 @@ impl Boostraping {
         let g = Rlwe::AUTO_G;
         let f_prime = f.automorphism(-g) * (X ^ (b * g));
         let acc = RlwePlaintext(f_prime).into();
-        Boostraping::blind_rotate_core(param, brk, ak, a, acc)
+        Bootstrapping::blind_rotate_core(param, brk, ak, a, acc)
     }
 
     // Algorithm 3 in 2022/198.
     fn blind_rotate_core(
-        param: &BoostrapingParam,
+        param: &BootstrappingParam,
         brk: &[RgswCiphertext],
         ak: &[RlweAutoKey],
         a: AVec<Fq>,

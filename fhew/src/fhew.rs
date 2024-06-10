@@ -2,7 +2,7 @@
 //! [\[LMKCDEY\]](https://eprint.iacr.org/2022/198.pdf) bootstrapping.
 
 use crate::{
-    boostrapping::{Boostraping, BoostrapingKey, BoostrapingParam},
+    bootstrapping::{Bootstrapping, BootstrappingKey, BootstrappingParam},
     lwe::{Lwe, LweCiphertext, LwePlaintext, LweSecretKey},
     util::Fq,
 };
@@ -16,13 +16,13 @@ pub struct Fhew;
 pub struct FhewBit(LweCiphertext);
 
 impl Fhew {
-    fn encode(param: &BoostrapingParam, m: bool) -> LwePlaintext {
+    fn encode(param: &BootstrappingParam, m: bool) -> LwePlaintext {
         assert_eq!(param.p(), 4);
 
         Lwe::encode(param.lwe_z(), Fq::from_i8(param.p(), m as i8))
     }
 
-    fn decode(param: &BoostrapingParam, pt: LwePlaintext) -> bool {
+    fn decode(param: &BootstrappingParam, pt: LwePlaintext) -> bool {
         assert_eq!(param.p(), 4);
 
         let m = u64::from(Lwe::decode(param.lwe_z(), pt));
@@ -32,7 +32,7 @@ impl Fhew {
     }
 
     pub fn sk_encrypt(
-        param: &BoostrapingParam,
+        param: &BootstrappingParam,
         sk: &LweSecretKey,
         m: bool,
         rng: &mut impl RngCore,
@@ -42,22 +42,22 @@ impl Fhew {
         FhewBit(ct)
     }
 
-    pub fn decrypt(param: &BoostrapingParam, sk: &LweSecretKey, ct: FhewBit) -> bool {
+    pub fn decrypt(param: &BootstrappingParam, sk: &LweSecretKey, ct: FhewBit) -> bool {
         let pt = Lwe::decrypt(param.lwe_z(), sk, ct.0);
         Fhew::decode(param, pt)
     }
 
     pub fn not(
-        param: &BoostrapingParam,
-        _: &BoostrapingKey,
+        param: &BootstrappingParam,
+        _: &BootstrappingKey,
         FhewBit(LweCiphertext(a, b)): FhewBit,
     ) -> FhewBit {
         FhewBit(LweCiphertext(-a, -b + param.big_q_by_4()))
     }
 
     fn op(
-        param: &BoostrapingParam,
-        bk: &BoostrapingKey,
+        param: &BootstrappingParam,
+        bk: &BootstrappingKey,
         table: [usize; 4],
         ct: LweCiphertext,
     ) -> FhewBit {
@@ -66,27 +66,25 @@ impl Fhew {
             .into_iter()
             .flat_map(|out| repeat(map[out]).take(param.q_by_8()))
             .collect();
-        let LweCiphertext(a, b) = Boostraping::boostrap(param, bk, &f, ct);
+        let LweCiphertext(a, b) = Bootstrapping::bootstrap(param, bk, &f, ct);
         FhewBit(LweCiphertext(a, b + param.big_q_by_8()))
     }
 }
 
 macro_rules! impl_op {
-    (@ $op:ident, $table:expr, |$ct0:ident, $ct1:ident $(, $ct2:ident)?| $lin:expr) => {
+    (@ $op:ident, $table:expr, |$($ct:ident),+| $lin:expr) => {
         impl Fhew {
             pub fn $op(
-                param: &BoostrapingParam,
-                bk: &BoostrapingKey,
-                FhewBit($ct0): FhewBit,
-                FhewBit($ct1): FhewBit,
-                $(FhewBit($ct2): FhewBit,)?
+                param: &BootstrappingParam,
+                bk: &BootstrappingKey,
+                $(FhewBit($ct): FhewBit,)+
             ) -> FhewBit {
                 Fhew::op(param, bk, $table, $lin)
             }
         }
     };
-    ($($op:ident, $table:expr, |$ct0:ident, $ct1:ident $(, $ct2:ident)?| $lin:expr);* $(;)?) => {
-        $(impl_op!(@ $op, $table, |$ct0, $ct1 $(, $ct2)?| $lin);)*
+    ($($op:ident, $table:expr, |$($ct:ident),+| $lin:expr);* $(;)?) => {
+        $(impl_op!(@ $op, $table, |$($ct),+| $lin);)*
     }
 }
 
@@ -104,7 +102,7 @@ impl_op!(
 #[cfg(test)]
 mod test {
     use crate::{
-        boostrapping::{Boostraping, BoostrapingParam},
+        bootstrapping::{Bootstrapping, BootstrappingParam},
         fhew::Fhew,
         lwe::{Lwe, LweParam},
         rgsw::RgswParam,
@@ -130,16 +128,16 @@ mod test {
                 LweParam::new(q, p, n).with_decomposor(log_b, d)
             };
             let w = 10;
-            BoostrapingParam::new(rgsw, lwe, w)
+            BootstrappingParam::new(rgsw, lwe, w)
         };
         let sk = Lwe::key_gen(param.lwe_z(), &mut rng);
-        let bk = Boostraping::key_gen(&param, &sk, &mut rng);
+        let bk = Bootstrapping::key_gen(&param, &sk, &mut rng);
 
         macro_rules! assert_correct_op {
-            ($op:ident($ct0:ident $(, $ct1:ident $(, $ct2:ident)?)?) == $output:expr) => {
+            ($op:ident($($ct:ident),+) == $output:expr) => {
                 assert_eq!(
                     $output,
-                    Fhew::decrypt(&param, &sk, Fhew::$op(&param, &bk, $ct0.clone() $(, $ct1.clone() $(, $ct2.clone())?)?))
+                    Fhew::decrypt(&param, &sk, Fhew::$op(&param, &bk, $($ct.clone()),+))
                 )
             };
         }
