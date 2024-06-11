@@ -133,11 +133,11 @@ mod test {
         let sk = Lwe::key_gen(param.lwe_z(), &mut rng);
         let bk = Bootstrapping::key_gen(&param, &sk, &mut rng);
 
-        macro_rules! assert_correct_op {
-            ($op:ident($($ct:ident),+) == $output:expr) => {
+        macro_rules! assert_decrypted_to {
+            ($op:ident($($ct:ident),+), $m:expr) => {
                 assert_eq!(
-                    $output,
-                    Fhew::decrypt(&param, &sk, Fhew::$op(&param, &bk, $($ct.clone()),+))
+                    Fhew::decrypt(&param, &sk, Fhew::$op(&param, &bk, $($ct.clone()),+)),
+                    $m,
                 )
             };
         }
@@ -145,22 +145,22 @@ mod test {
         for m in 0..1 << 1 {
             let m = m == 1;
             let ct = Fhew::sk_encrypt(&param, &sk, m, &mut rng);
-            assert_correct_op!(not(ct) == !m);
+            assert_decrypted_to!(not(ct), !m);
         }
         for m in 0..1 << 2 {
             let [m0, m1] = from_fn(|i| (m >> i) & 1 == 1);
             let [ct0, ct1] = [m0, m1].map(|m| Fhew::sk_encrypt(&param, &sk, m, &mut rng));
-            assert_correct_op!(and(ct0, ct1) == m0 & m1);
-            assert_correct_op!(nand(ct0, ct1) == !(m0 & m1));
-            assert_correct_op!(or(ct0, ct1) == m0 | m1);
-            assert_correct_op!(nor(ct0, ct1) == !(m0 | m1));
-            assert_correct_op!(xor(ct0, ct1) == m0 ^ m1);
-            assert_correct_op!(xnor(ct0, ct1) == !(m0 ^ m1));
+            assert_decrypted_to!(and(ct0, ct1), m0 & m1);
+            assert_decrypted_to!(nand(ct0, ct1), !(m0 & m1));
+            assert_decrypted_to!(or(ct0, ct1), m0 | m1);
+            assert_decrypted_to!(nor(ct0, ct1), !(m0 | m1));
+            assert_decrypted_to!(xor(ct0, ct1), m0 ^ m1);
+            assert_decrypted_to!(xnor(ct0, ct1), !(m0 ^ m1));
         }
         for m in 0..1 << 3 {
             let [m0, m1, m2] = from_fn(|i| (m >> i) & 1 == 1);
             let [ct0, ct1, ct2] = [m0, m1, m2].map(|m| Fhew::sk_encrypt(&param, &sk, m, &mut rng));
-            assert_correct_op!(majority(ct0, ct1, ct2) == (m0 & m1) | (m1 & m2) | (m2 & m0));
+            assert_decrypted_to!(majority(ct0, ct1, ct2), (m0 & m1) | (m1 & m2) | (m2 & m0));
         }
     }
 }

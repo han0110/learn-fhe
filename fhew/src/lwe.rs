@@ -191,7 +191,7 @@ mod test {
     }
 
     #[test]
-    fn eval_add() {
+    fn add_sub() {
         let mut rng = StdRng::from_entropy();
         let (q, p, n) = (1 << 16, 1 << 4, 1024);
         let param = LweParam::new(q, p, n);
@@ -200,25 +200,10 @@ mod test {
             let [m0, m1] = [m0, m1].map(|m| Fq::from_u64(param.p(), m));
             let [pt0, pt1] = [m0, m1].map(|m| Lwe::encode(&param, m));
             let [ct0, ct1] = [pt0, pt1].map(|pt| Lwe::sk_encrypt(&param, &sk, pt, &mut rng));
-            let ct2 = ct0 + ct1;
-            let m2 = m0 + m1;
+            let (m2, ct2) = (m0 + m1, ct0.clone() + ct1.clone());
+            let (m3, ct3) = (m0 - m1, ct0.clone() - ct1.clone());
             assert_eq!(m2, Lwe::decode(&param, Lwe::decrypt(&param, &sk, ct2)));
-        }
-    }
-
-    #[test]
-    fn eval_sub() {
-        let mut rng = StdRng::from_entropy();
-        let (q, p, n) = (1 << 16, 1 << 4, 1024);
-        let param = LweParam::new(q, p, n);
-        let sk = Lwe::key_gen(&param, &mut rng);
-        for (m0, m1) in (0..param.p()).cartesian_product(0..param.p()) {
-            let [m0, m1] = [m0, m1].map(|m| Fq::from_u64(param.p(), m));
-            let [pt0, pt1] = [m0, m1].map(|m| Lwe::encode(&param, m));
-            let [ct0, ct1] = [pt0, pt1].map(|pt| Lwe::sk_encrypt(&param, &sk, pt, &mut rng));
-            let ct2 = ct0 - ct1;
-            let m2 = m0 - m1;
-            assert_eq!(m2, Lwe::decode(&param, Lwe::decrypt(&param, &sk, ct2)));
+            assert_eq!(m3, Lwe::decode(&param, Lwe::decrypt(&param, &sk, ct3)));
         }
     }
 

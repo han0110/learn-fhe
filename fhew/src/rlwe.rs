@@ -242,7 +242,7 @@ pub(crate) mod test {
     }
 
     #[test]
-    fn eval_add() {
+    fn add_sub() {
         let mut rng = StdRng::from_entropy();
         let (log_n_range, log_q, p) = (0..10, 45, 1 << 4);
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
@@ -251,25 +251,10 @@ pub(crate) mod test {
             let [m0, m1] = &from_fn(|_| Poly::sample_fq_uniform(param.n(), p, &mut rng));
             let [pt0, pt1] = [m0, m1].map(|m| Rlwe::encode(&param, m.clone()));
             let [ct0, ct1] = [pt0, pt1].map(|pt| Rlwe::pk_encrypt(&param, &pk, pt, &mut rng));
-            let ct2 = ct0 + ct1;
-            let m2 = m0 + m1;
+            let (m2, ct2) = (m0 + m1, ct0.clone() + ct1.clone());
+            let (m3, ct3) = (m0 - m1, ct0.clone() - ct1.clone());
             assert_eq!(m2, Rlwe::decode(&param, Rlwe::decrypt(&param, &sk, ct2)));
-        }
-    }
-
-    #[test]
-    fn eval_sub() {
-        let mut rng = StdRng::from_entropy();
-        let (log_n_range, log_q, p) = (0..10, 45, 1 << 4);
-        for (log_n, q) in testing_n_q(log_n_range, log_q) {
-            let param = RlweParam::new(q, p, log_n);
-            let (sk, pk) = Rlwe::key_gen(&param, &mut rng);
-            let [m0, m1] = &from_fn(|_| Poly::sample_fq_uniform(param.n(), p, &mut rng));
-            let [pt0, pt1] = [m0, m1].map(|m| Rlwe::encode(&param, m.clone()));
-            let [ct0, ct1] = [pt0, pt1].map(|pt| Rlwe::pk_encrypt(&param, &pk, pt, &mut rng));
-            let ct2 = ct0 - ct1;
-            let m2 = m0 - m1;
-            assert_eq!(m2, Rlwe::decode(&param, Rlwe::decrypt(&param, &sk, ct2)));
+            assert_eq!(m3, Rlwe::decode(&param, Rlwe::decrypt(&param, &sk, ct3)));
         }
     }
 
