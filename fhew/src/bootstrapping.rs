@@ -23,6 +23,7 @@ pub struct BootstrappingParam {
 
 impl BootstrappingParam {
     pub fn new(rgsw: RgswParam, lwe_s: LweParam, w: usize) -> Self {
+        assert_eq!(rgsw.p(), lwe_s.p());
         let lwe_z = LweParam::new(rgsw.q(), rgsw.p(), rgsw.n());
         Self {
             rgsw,
@@ -85,7 +86,7 @@ impl BootstrappingParam {
 pub struct BootstrappingKey {
     ksk: LweKeySwitchingKey,
     brk: Vec<RgswCiphertext>,
-    ak: Vec<RlweAutoKey>,
+    ak: AVec<RlweAutoKey>,
 }
 
 impl Bootstrapping {

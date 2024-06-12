@@ -2,7 +2,7 @@ use crate::{
     lwe::{LweCiphertext, LweParam, LweSecretKey},
     util::{dg, zo, AVec, Dot, Fq, Poly},
 };
-use derive_more::{Add, Deref, Sub};
+use derive_more::{Add, AddAssign, Deref, Sub, SubAssign};
 use itertools::chain;
 use rand::RngCore;
 
@@ -35,7 +35,7 @@ impl From<&LweSecretKey> for RlweSecretKey {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Add, Sub, AddAssign, SubAssign)]
 pub struct RlwePublicKey(Poly<Fq>, Poly<Fq>);
 
 impl RlwePublicKey {
@@ -48,8 +48,8 @@ impl RlwePublicKey {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct RlweKeySwitchingKey(Vec<RlweCiphertext>);
+#[derive(Clone, Debug, Add, Sub, AddAssign, SubAssign)]
+pub struct RlweKeySwitchingKey(AVec<RlweCiphertext>);
 
 impl RlweKeySwitchingKey {
     pub fn a(&self) -> impl Iterator<Item = &Poly<Fq>> {
@@ -73,7 +73,7 @@ impl RlweAutoKey {
 #[derive(Clone, Debug)]
 pub struct RlwePlaintext(pub(crate) Poly<Fq>);
 
-#[derive(Clone, Debug, Add, Sub)]
+#[derive(Clone, Debug, Add, Sub, AddAssign, SubAssign)]
 pub struct RlweCiphertext(pub(crate) Poly<Fq>, pub(crate) Poly<Fq>);
 
 impl RlweCiphertext {
@@ -137,7 +137,6 @@ impl Rlwe {
     pub fn encode(param: &RlweParam, m: Poly<Fq>) -> RlwePlaintext {
         assert_eq!(m.n(), param.n());
         assert!(m.iter().all(|m| m.q() == param.p()));
-
         let scale_up = |m| Fq::from_f64(param.q(), f64::from(m) * param.delta());
         RlwePlaintext(m.iter().map(scale_up).collect())
     }
@@ -203,6 +202,57 @@ impl Rlwe {
         .collect();
         let b = ct.b()[i];
         LweCiphertext(a, b)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RlwePublicKeyShare(Poly<Fq>);
+
+#[derive(Clone, Debug)]
+pub struct RlweDecryptionShare(Poly<Fq>);
+
+impl Rlwe {
+    pub fn mk_key_gen(
+        param: &RlweParam,
+        a: &Poly<Fq>,
+        rng: &mut impl RngCore,
+    ) -> (RlweSecretKey, RlwePublicKeyShare) {
+        let sk = RlweSecretKey(Poly::sample(param.n(), &dg(3.2, 6), rng));
+        let pks = {
+            let e = Poly::sample_fq_from_i8(param.n(), param.q(), &dg(3.2, 6), rng);
+            let b = a * &sk.0 + e;
+            RlwePublicKeyShare(b)
+        };
+        (sk, pks)
+    }
+
+    pub fn mk_merge_pks(
+        _: &RlweParam,
+        a: &Poly<Fq>,
+        pks: impl IntoIterator<Item = RlwePublicKeyShare>,
+    ) -> RlwePublicKey {
+        let b = pks.into_iter().map(|s| s.0).sum();
+        RlwePublicKey(a.clone(), b)
+    }
+
+    pub fn mk_decrypt(
+        param: &RlweParam,
+        sk: &RlweSecretKey,
+        a: &Poly<Fq>,
+        rng: &mut impl RngCore,
+    ) -> RlweDecryptionShare {
+        let e = Poly::sample_fq_from_i8(param.n(), param.q(), &dg(3.2, 6), rng);
+        let p = a * &sk.0 + e;
+        RlweDecryptionShare(p)
+    }
+
+    pub fn mk_merge_ds(
+        _: &RlweParam,
+        b: &Poly<Fq>,
+        ds: impl IntoIterator<Item = RlweDecryptionShare>,
+    ) -> RlwePlaintext {
+        let pt = b - ds.into_iter().map(|s| s.0).sum::<Poly<_>>();
+        RlwePlaintext(pt)
     }
 }
 
@@ -312,6 +362,28 @@ pub(crate) mod test {
                 let ct = Rlwe::sample_extract(&param, ct.clone(), i);
                 assert_eq!(m[i], Lwe::decode(&param, Lwe::decrypt(&param, &sk, ct)));
             }
+        }
+    }
+
+    #[test]
+    fn multi_key() {
+        let mut rng = StdRng::from_entropy();
+        let (log_n_range, log_q, p) = (0..10, 45, 1 << 4);
+        for (log_n, q) in testing_n_q(log_n_range, log_q) {
+            let param = RlweParam::new(q, p, log_n);
+            let a = Poly::sample_fq_uniform(param.n(), param.q(), &mut rng);
+            let (sk0, pks0) = Rlwe::mk_key_gen(&param, &a, &mut rng);
+            let (sk1, pks1) = Rlwe::mk_key_gen(&param, &a, &mut rng);
+            let (sk2, pks2) = Rlwe::mk_key_gen(&param, &a, &mut rng);
+            let pk = Rlwe::mk_merge_pks(&param, &a, [pks0, pks1, pks2]);
+            let m = Poly::sample_fq_uniform(param.n(), p, &mut rng);
+            let pt = Rlwe::encode(&param, m.clone());
+            let ct = Rlwe::pk_encrypt(&param, &pk, pt, &mut rng);
+            let ds0 = Rlwe::mk_decrypt(&param, &sk0, ct.a(), &mut rng);
+            let ds1 = Rlwe::mk_decrypt(&param, &sk1, ct.a(), &mut rng);
+            let ds2 = Rlwe::mk_decrypt(&param, &sk2, ct.a(), &mut rng);
+            let pt = Rlwe::mk_merge_ds(&param, ct.b(), [ds0, ds1, ds2]);
+            assert_eq!(m, Rlwe::decode(&param, pt));
         }
     }
 }

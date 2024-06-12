@@ -47,6 +47,10 @@ impl Fq {
         Self::from_i64(q, v.round() as i64)
     }
 
+    pub fn from_bool(q: u64, v: bool) -> Self {
+        Self::from_u64(q, v as u64)
+    }
+
     fn into_c64(self) -> i64 {
         if self.v > self.q >> 1 {
             self.v as i64 - self.q as i64

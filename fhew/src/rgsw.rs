@@ -3,7 +3,7 @@ use crate::{
     util::{AVec, Decomposable, Decomposor, Dot, Fq, Poly},
 };
 use core::{borrow::Borrow, iter::repeat_with};
-use derive_more::{Add, Deref, Sub};
+use derive_more::{Add, AddAssign, Deref, Sub, SubAssign};
 use itertools::{chain, izip, Either};
 use rand::RngCore;
 
@@ -31,7 +31,7 @@ pub type RgswPublicKey = RlwePublicKey;
 #[derive(Clone, Debug)]
 pub struct RgswPlaintext(pub(crate) Poly<Fq>);
 
-#[derive(Clone, Debug, Add, Sub)]
+#[derive(Clone, Debug, Add, Sub, AddAssign, SubAssign)]
 pub struct RgswCiphertext(AVec<RlweCiphertext>);
 
 impl RgswCiphertext {
@@ -52,7 +52,6 @@ impl Rgsw {
     pub fn encode(param: &RgswParam, m: Poly<Fq>) -> RgswPlaintext {
         assert_eq!(m.n(), param.n());
         assert!(m.iter().all(|m| m.q() == param.p()));
-
         let to_fq = |m: Fq| Fq::from_u64(param.q(), m.into());
         RgswPlaintext(m.into_iter().map(to_fq).collect())
     }

@@ -65,6 +65,12 @@ impl Poly<Fq> {
         poly
     }
 
+    pub fn constant(n: usize, v: Fq) -> Self {
+        let mut poly = Self::zero(n, v.q());
+        poly[0] = v;
+        poly
+    }
+
     pub fn sample_fq_uniform(n: usize, q: u64, rng: &mut impl RngCore) -> Self {
         Self::new(AVec::sample_fq_uniform(n, q, rng))
     }
@@ -153,7 +159,6 @@ impl<'a, T> IntoIterator for &'a mut Poly<T> {
 impl MulAssign<&Poly<Fq>> for Poly<Fq> {
     fn mul_assign(&mut self, rhs: &Poly<Fq>) {
         assert_eq!(self.len(), rhs.len());
-
         match NEG_NTT_PSI
             .get_or_init(Default::default)
             .lock()

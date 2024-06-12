@@ -2,7 +2,7 @@ use crate::{
     rlwe::RlweSecretKey,
     util::{dg, AVec, Decomposor, Dot, Fq},
 };
-use derive_more::{Add, Sub};
+use derive_more::{Add, AddAssign, Sub, SubAssign};
 use itertools::chain;
 use rand::RngCore;
 
@@ -64,8 +64,8 @@ impl From<&RlweSecretKey> for LweSecretKey {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct LweKeySwitchingKey(Vec<LweCiphertext>);
+#[derive(Clone, Debug, Add, Sub, AddAssign, SubAssign)]
+pub struct LweKeySwitchingKey(pub(crate) AVec<LweCiphertext>);
 
 impl LweKeySwitchingKey {
     pub fn a(&self) -> impl Iterator<Item = &AVec<Fq>> {
@@ -80,7 +80,7 @@ impl LweKeySwitchingKey {
 #[derive(Clone, Debug)]
 pub struct LwePlaintext(pub(crate) Fq);
 
-#[derive(Clone, Debug, Add, Sub)]
+#[derive(Clone, Debug, Add, Sub, AddAssign, SubAssign)]
 pub struct LweCiphertext(pub(crate) AVec<Fq>, pub(crate) Fq);
 
 impl LweCiphertext {

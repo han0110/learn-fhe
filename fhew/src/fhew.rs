@@ -16,18 +16,10 @@ pub struct Fhew;
 pub struct FhewBit(LweCiphertext);
 
 impl Fhew {
-    fn encode(param: &BootstrappingParam, m: bool) -> LwePlaintext {
-        assert_eq!(param.p(), 4);
-
-        Lwe::encode(param.lwe_z(), Fq::from_i8(param.p(), m as i8))
-    }
-
     fn decode(param: &BootstrappingParam, pt: LwePlaintext) -> bool {
         assert_eq!(param.p(), 4);
-
         let m = u64::from(Lwe::decode(param.lwe_z(), pt));
         assert!(m == 0 || m == 1);
-
         m == 1
     }
 
@@ -37,7 +29,9 @@ impl Fhew {
         m: bool,
         rng: &mut impl RngCore,
     ) -> FhewBit {
-        let pt = Fhew::encode(param, m);
+        assert_eq!(param.p(), 4);
+        let m = Fq::from_bool(param.p(), m);
+        let pt = Lwe::encode(param.lwe_z(), m);
         let ct = Lwe::sk_encrypt(param.lwe_z(), sk, pt, rng);
         FhewBit(ct)
     }
