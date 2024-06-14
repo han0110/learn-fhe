@@ -7,24 +7,42 @@ use crate::util::{
 };
 use core::{
     borrow::Borrow,
-    fmt::{self, Display, Formatter},
+    fmt::{self, Debug, Display, Formatter},
     iter::Sum,
+    marker::PhantomData,
     ops::{AddAssign, BitXor, Mul, MulAssign, Neg},
     slice,
 };
-use derive_more::{Deref, DerefMut, From, Into};
+use derive_more::{Deref, DerefMut};
 use itertools::izip;
 use rand::RngCore;
 use rand_distr::Distribution;
 use std::vec;
 
-#[derive(Clone, Debug, PartialEq, Eq, Deref, DerefMut, From, Into)]
-pub struct Poly<T>(AVec<T>);
+pub trait Basis: Clone + Copy + Debug + PartialEq + Eq {}
 
-impl<T> Poly<T> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Coefficient;
+
+impl Basis for Coefficient {}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Evaluation;
+
+impl Basis for Evaluation {}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deref, DerefMut)]
+pub struct Poly<T, B: Basis = Coefficient>(
+    #[deref]
+    #[deref_mut]
+    AVec<T>,
+    PhantomData<B>,
+);
+
+impl<T, B: Basis> Poly<T, B> {
     fn new(v: AVec<T>) -> Self {
         assert!(v.len().is_power_of_two());
-        Self(v)
+        Self(v, PhantomData)
     }
 
     pub fn n(&self) -> usize {
@@ -34,11 +52,10 @@ impl<T> Poly<T> {
     pub fn sample(n: usize, dist: &impl Distribution<T>, rng: &mut impl RngCore) -> Self {
         Self::new(AVec::sample(n, dist, rng))
     }
+}
 
-    pub fn automorphism(&self, t: i64) -> Self
-    where
-        T: Copy + Neg<Output = T>,
-    {
+impl<T: Copy + Neg<Output = T>> Poly<T, Coefficient> {
+    pub fn automorphism(&self, t: i64) -> Self {
         let mut poly = self.clone();
         let n = self.n();
         let t = t.rem_euclid(2 * n as i64) as usize;
@@ -54,7 +71,7 @@ impl<T> Poly<T> {
     }
 }
 
-impl Poly<Fq> {
+impl Poly<Fq, Coefficient> {
     pub fn zero(n: usize, q: u64) -> Self {
         Self::new(vec![Fq::from_u64(q, 0); n].into())
     }
@@ -85,11 +102,27 @@ impl Poly<Fq> {
     }
 
     pub fn mod_switch(&self, q_prime: u64) -> Self {
-        Self(self.0.mod_switch(q_prime))
+        Self::new(self.0.mod_switch(q_prime))
     }
 
     pub fn mod_switch_odd(&self, q_prime: u64) -> Self {
-        Self(self.0.mod_switch_odd(q_prime))
+        Self::new(self.0.mod_switch_odd(q_prime))
+    }
+
+    pub fn to_evaluation(&self) -> Poly<Fq, Evaluation> {
+        let [psi, _] = &NEG_NTT_PSI.get().unwrap().lock().unwrap()[&self[0].q()];
+        let mut a = self.0.clone();
+        neg_ntt_in_place(&mut a, psi);
+        Poly::new(a)
+    }
+}
+
+impl Poly<Fq, Evaluation> {
+    pub fn to_coefficient(&self) -> Poly<Fq, Coefficient> {
+        let [_, psi_inv] = &NEG_NTT_PSI.get().unwrap().lock().unwrap()[&self[0].q()];
+        let mut a = self.0.clone();
+        neg_intt_in_place(&mut a, psi_inv);
+        Poly::new(a)
     }
 }
 
@@ -117,19 +150,25 @@ impl<T: Clone> From<&[T]> for Poly<T> {
     }
 }
 
-impl<T> Extend<T> for Poly<T> {
-    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
-        self.0.extend(iter)
+impl<T> From<Poly<T>> for AVec<T> {
+    fn from(value: Poly<T>) -> Self {
+        value.0
     }
 }
 
-impl<T> FromIterator<T> for Poly<T> {
+impl<T> From<AVec<T>> for Poly<T> {
+    fn from(value: AVec<T>) -> Self {
+        Self::new(value)
+    }
+}
+
+impl<T, B: Basis> FromIterator<T> for Poly<T, B> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect())
     }
 }
 
-impl<T> IntoIterator for Poly<T> {
+impl<T, B: Basis> IntoIterator for Poly<T, B> {
     type Item = T;
     type IntoIter = vec::IntoIter<T>;
 
@@ -138,7 +177,7 @@ impl<T> IntoIterator for Poly<T> {
     }
 }
 
-impl<'a, T> IntoIterator for &'a Poly<T> {
+impl<'a, T, B: Basis> IntoIterator for &'a Poly<T, B> {
     type Item = &'a T;
     type IntoIter = slice::Iter<'a, T>;
 
@@ -147,7 +186,7 @@ impl<'a, T> IntoIterator for &'a Poly<T> {
     }
 }
 
-impl<'a, T> IntoIterator for &'a mut Poly<T> {
+impl<'a, T, B: Basis> IntoIterator for &'a mut Poly<T, B> {
     type Item = &'a mut T;
     type IntoIter = slice::IterMut<'a, T>;
 
@@ -156,20 +195,22 @@ impl<'a, T> IntoIterator for &'a mut Poly<T> {
     }
 }
 
-impl MulAssign<&Poly<Fq>> for Poly<Fq> {
-    fn mul_assign(&mut self, rhs: &Poly<Fq>) {
+impl MulAssign<&Poly<Fq, Coefficient>> for Poly<Fq, Coefficient> {
+    fn mul_assign(&mut self, rhs: &Poly<Fq, Coefficient>) {
         assert_eq!(self.len(), rhs.len());
-        match NEG_NTT_PSI
-            .get_or_init(Default::default)
-            .lock()
-            .unwrap()
-            .get(&self[0].q())
-        {
+        match NEG_NTT_PSI.get().unwrap().lock().unwrap().get(&self[0].q()) {
             Some([psi, psi_inv]) if self.n() <= psi.len() => {
                 neg_ntt_mul_assign(self, rhs, psi, psi_inv)
             }
             _ => *self = neg_schoolbook_mul(self, rhs),
         }
+    }
+}
+
+impl MulAssign<&Poly<Fq, Evaluation>> for Poly<Fq, Evaluation> {
+    fn mul_assign(&mut self, rhs: &Poly<Fq, Evaluation>) {
+        assert_eq!(self.len(), rhs.len());
+        izip!(self, rhs).for_each(|(lhs, rhs)| *lhs *= rhs);
     }
 }
 
@@ -188,14 +229,15 @@ impl Mul<&Fq> for &Poly<i8> {
     }
 }
 
-impl<T, Item> Sum<Item> for Poly<T>
+impl<T, B, Item> Sum<Item> for Poly<T, B>
 where
     T: Clone + for<'t> AddAssign<&'t T>,
-    Item: Borrow<Poly<T>>,
+    B: Basis,
+    Item: Borrow<Poly<T, B>>,
 {
     fn sum<I: Iterator<Item = Item>>(mut iter: I) -> Self {
         let init = iter.next().unwrap().borrow().0.clone();
-        Self(iter.fold(init, |mut acc, item| {
+        Self::new(iter.fold(init, |mut acc, item| {
             acc += &item.borrow().0;
             acc
         }))
@@ -203,46 +245,53 @@ where
 }
 
 impl_element_wise_neg!(
-    impl<T> Neg for Poly<T>,
+    impl<T> Neg for Poly<T, Coefficient>,
+    impl<T> Neg for Poly<T, Evaluation>,
 );
 impl_element_wise_op_assign!(
-    impl<T> AddAssign<Poly<T>> for Poly<T>,
-    impl<T> SubAssign<Poly<T>> for Poly<T>,
+    impl<T> AddAssign<Poly<T, Coefficient>> for Poly<T, Coefficient>,
+    impl<T> AddAssign<Poly<T, Evaluation>> for Poly<T, Evaluation>,
+    impl<T> SubAssign<Poly<T, Coefficient>> for Poly<T, Coefficient>,
+    impl<T> SubAssign<Poly<T, Evaluation>> for Poly<T, Evaluation>,
 );
 impl_element_wise_op!(
-    impl<T> Add<Poly<T>> for Poly<T>,
-    impl<T> Sub<Poly<T>> for Poly<T>,
+    impl<T> Add<Poly<T, Coefficient>> for Poly<T, Coefficient>,
+    impl<T> Add<Poly<T, Evaluation>> for Poly<T, Evaluation>,
+    impl<T> Sub<Poly<T, Coefficient>> for Poly<T, Coefficient>,
+    impl<T> Sub<Poly<T, Evaluation>> for Poly<T, Evaluation>,
 );
 impl_mul_assign_element!(
-    impl<T> MulAssign<T> for Poly<T>,
+    impl<T> MulAssign<T> for Poly<T, Coefficient>,
+    impl<T> MulAssign<T> for Poly<T, Evaluation>,
 );
 impl_mul_element!(
-    impl<T> Mul<T> for Poly<T>,
+    impl<T> Mul<T> for Poly<T, Coefficient>,
+    impl<T> Mul<T> for Poly<T, Evaluation>,
 );
 
 macro_rules! impl_poly_fq_mul {
-    (@ impl Mul<$rhs:ty> for $lhs:ty; $lhs_convert:expr) => {
+    (@ impl Mul<$rhs:ty> for $lhs:ty; type Output = $out:ty; $lhs_convert:expr) => {
         impl core::ops::Mul<$rhs> for $lhs {
-            type Output = Poly<Fq>;
+            type Output = $out;
 
-            fn mul(self, rhs: $rhs) -> Poly<Fq> {
+            fn mul(self, rhs: $rhs) -> $out {
                 let mut lhs = $lhs_convert(self);
                 lhs.mul_assign(rhs.borrow());
                 lhs
             }
         }
     };
-    ($(impl Mul<$rhs:ty> for Poly<Fq>),* $(,)?) => {
+    ($(impl Mul<$rhs:ty> for $lhs:ty),* $(,)?) => {
         $(
-            impl core::ops::MulAssign<$rhs> for Poly<Fq> {
+            impl core::ops::MulAssign<$rhs> for $lhs {
                 fn mul_assign(&mut self, rhs: $rhs) {
                     *self *= &rhs;
                 }
             }
-            impl_poly_fq_mul!(@ impl Mul<$rhs> for Poly<Fq>; core::convert::identity);
-            impl_poly_fq_mul!(@ impl Mul<&$rhs> for Poly<Fq>; core::convert::identity);
-            impl_poly_fq_mul!(@ impl Mul<$rhs> for &Poly<Fq>; <_>::clone);
-            impl_poly_fq_mul!(@ impl Mul<&$rhs> for &Poly<Fq>; <_>::clone);
+            impl_poly_fq_mul!(@ impl Mul<$rhs> for $lhs; type Output = $lhs; core::convert::identity);
+            impl_poly_fq_mul!(@ impl Mul<&$rhs> for $lhs; type Output = $lhs; core::convert::identity);
+            impl_poly_fq_mul!(@ impl Mul<$rhs> for &$lhs; type Output = $lhs; <_>::clone);
+            impl_poly_fq_mul!(@ impl Mul<&$rhs> for &$lhs; type Output = $lhs; <_>::clone);
         )*
     }
 }
@@ -267,7 +316,8 @@ macro_rules! impl_poly_i8_mul {
 }
 
 impl_poly_fq_mul!(
-    impl Mul<Poly<Fq>> for Poly<Fq>,
+    impl Mul<Poly<Fq, Coefficient>> for Poly<Fq, Coefficient>,
+    impl Mul<Poly<Fq, Evaluation>> for Poly<Fq, Evaluation>,
     impl Mul<Poly<i8>> for Poly<Fq>,
     impl Mul<Monomial> for Poly<Fq>,
 );

@@ -55,10 +55,15 @@ impl Decomposable for Fq {
     }
 
     fn decompose(self, log_b: usize) -> impl Iterator<Item = Self> {
-        let mask = (1 << log_b) - 1;
-        (0..)
-            .step_by(log_b)
-            .map(move |bits| Self::from_u64(self.q(), (u64::from(self) >> bits) & mask))
+        let (b_by_2, mask, neg_b) = (1 << (log_b - 1), (1 << log_b) - 1, self.q() - (1 << log_b));
+        let mut v = self.into_center_unsigned();
+        repeat_with(move || {
+            let limb = v & mask;
+            let carry = (limb + (v & 1) > b_by_2) as u64;
+            v >>= log_b;
+            v += carry;
+            Self::from_u64(self.q(), limb + carry * neg_b)
+        })
     }
 }
 

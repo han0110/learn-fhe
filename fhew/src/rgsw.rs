@@ -67,7 +67,7 @@ impl Rgsw {
         pt: RgswPlaintext,
         rng: &mut impl RngCore,
     ) -> RgswCiphertext {
-        Self::encrypt(param, Either::Left(sk), pt, rng)
+        Rgsw::encrypt(param, Either::Left(sk), pt, rng)
     }
 
     pub fn pk_encrypt(
@@ -76,7 +76,7 @@ impl Rgsw {
         pt: RgswPlaintext,
         rng: &mut impl RngCore,
     ) -> RgswCiphertext {
-        Self::encrypt(param, Either::Right(pk), pt, rng)
+        Rgsw::encrypt(param, Either::Right(pk), pt, rng)
     }
 
     fn encrypt(
@@ -123,9 +123,19 @@ impl Rgsw {
         ct0: impl Borrow<RgswCiphertext>,
         ct1: impl Borrow<RgswCiphertext>,
     ) -> RgswCiphertext {
-        let (ct0, ct1) = (ct0.borrow(), ct1.borrow());
-        let cts = chain![&ct0.0]
-            .map(|ct0i| Rgsw::external_product(param, ct1, ct0i))
+        let (ct0_a, ct0_b) = chain![&ct0.borrow().0]
+            .map(|c| (c.a().to_evaluation(), c.b().to_evaluation()))
+            .unzip::<_, _, Vec<_>, Vec<_>>();
+        let cts = chain![&ct1.borrow().0]
+            .map(|ct1| {
+                let ct1_limbs = chain![[ct1.a(), ct1.b()]]
+                    .flat_map(|v| param.decomposor.decompose(v))
+                    .map(|p| p.to_evaluation())
+                    .collect::<AVec<_>>();
+                let a = ct0_a.dot(&ct1_limbs).to_coefficient();
+                let b = ct0_b.dot(&ct1_limbs).to_coefficient();
+                RlweCiphertext(a, b)
+            })
             .collect();
         RgswCiphertext(cts)
     }

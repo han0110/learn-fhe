@@ -51,11 +51,19 @@ impl Fq {
         Self::from_u64(q, v as u64)
     }
 
-    fn into_c64(self) -> i64 {
-        if self.v > self.q >> 1 {
-            self.v as i64 - self.q as i64
-        } else {
+    pub(crate) fn into_center_signed(self) -> i64 {
+        if self.v < self.q >> 1 {
             self.v as i64
+        } else {
+            self.v as i64 - self.q as i64
+        }
+    }
+
+    pub(crate) fn into_center_unsigned(self) -> u64 {
+        if self.v < self.q >> 1 {
+            self.v
+        } else {
+            !(self.q - self.v) + 1
         }
     }
 
@@ -115,19 +123,19 @@ impl From<&Fq> for u64 {
 
 impl From<&Fq> for i64 {
     fn from(value: &Fq) -> Self {
-        value.into_c64()
+        value.into_center_signed()
     }
 }
 
 impl From<Fq> for f64 {
     fn from(value: Fq) -> Self {
-        value.into_c64() as f64
+        value.into_center_signed() as f64
     }
 }
 
 impl From<&Fq> for f64 {
     fn from(value: &Fq) -> Self {
-        value.into_c64() as f64
+        value.into_center_signed() as f64
     }
 }
 
