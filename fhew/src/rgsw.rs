@@ -22,6 +22,10 @@ impl RgswParam {
         let decomposor = Decomposor::new(rlwe.q(), log_b, d);
         Self { rlwe, decomposor }
     }
+
+    pub fn decomposor(&self) -> &Decomposor {
+        &self.decomposor
+    }
 }
 
 pub type RgswSecretKey = RlweSecretKey;
@@ -90,18 +94,18 @@ impl Rgsw {
             Either::Left(sk) => Rlwe::sk_encrypt(param, sk, zero.clone(), rng),
             Either::Right(pk) => Rlwe::pk_encrypt(param, pk, zero.clone(), rng),
         };
-        let mut cts = repeat_with(rlwe_encrypt_zero)
-            .take(2 * param.decomposor.d())
+        let mut ct = repeat_with(rlwe_encrypt_zero)
+            .take(2 * param.decomposor().d())
             .collect::<AVec<_>>();
-        let (c0, c1) = cts.split_at_mut(param.decomposor.d());
-        izip!(c0, param.decomposor.bases()).for_each(|(ct, bi)| ct.0 += &pt.0 * bi);
-        izip!(c1, param.decomposor.bases()).for_each(|(ct, bi)| ct.1 += &pt.0 * bi);
-        RgswCiphertext(cts)
+        let (c0, c1) = ct.split_at_mut(param.decomposor().d());
+        izip!(c0, param.decomposor().bases()).for_each(|(ct, bi)| ct.0 += &pt.0 * bi);
+        izip!(c1, param.decomposor().bases()).for_each(|(ct, bi)| ct.1 += &pt.0 * bi);
+        RgswCiphertext(ct)
     }
 
     pub fn decrypt(param: &RgswParam, sk: &RgswSecretKey, ct: RgswCiphertext) -> RgswPlaintext {
         let pt = Rlwe::decrypt(param, sk, ct.0.into_iter().last().unwrap());
-        RgswPlaintext(pt.0.rounding_shr(param.decomposor.log_bases().last().unwrap()))
+        RgswPlaintext(pt.0.rounding_shr(param.decomposor().log_bases().last().unwrap()))
     }
 
     pub fn external_product(
@@ -111,7 +115,7 @@ impl Rgsw {
     ) -> RlweCiphertext {
         let (ct0, ct1) = (ct0.borrow(), ct1.borrow());
         let ct1_limbs = chain![[ct1.a(), ct1.b()]]
-            .flat_map(|v| param.decomposor.decompose(v))
+            .flat_map(|v| param.decomposor().decompose(v))
             .collect::<AVec<_>>();
         let a = ct0.a().dot(&ct1_limbs);
         let b = ct0.b().dot(&ct1_limbs);
@@ -126,7 +130,7 @@ impl Rgsw {
         let (ct0_a, ct0_b) = chain![&ct0.borrow().0]
             .map(|c| (c.a().to_evaluation(), c.b().to_evaluation()))
             .unzip::<_, _, Vec<_>, Vec<_>>();
-        let cts = chain![&ct1.borrow().0]
+        let ct = chain![&ct1.borrow().0]
             .map(|ct1| {
                 let ct1_limbs = chain![[ct1.a(), ct1.b()]]
                     .flat_map(|v| param.decomposor.decompose(v))
@@ -137,7 +141,7 @@ impl Rgsw {
                 RlweCiphertext(a, b)
             })
             .collect();
-        RgswCiphertext(cts)
+        RgswCiphertext(ct)
     }
 }
 

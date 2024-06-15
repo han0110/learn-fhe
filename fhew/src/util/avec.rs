@@ -7,7 +7,6 @@ use core::{
     slice,
 };
 use derive_more::{Deref, DerefMut, From, Into};
-use itertools::izip;
 use rand::RngCore;
 use rand_distr::Distribution;
 use std::vec;
@@ -134,8 +133,7 @@ macro_rules! impl_element_wise_op_assign {
                 for<$life> $t: $constraint,
             {
                 fn [<$trait:snake:lower>](&mut self, rhs: $rhs) {
-                    assert_eq!(self.len(), rhs.len());
-                    izip!(self, rhs).for_each(|(lhs, rhs)| lhs.[<$trait:snake:lower>](rhs));
+                    crate::util::izip_eq!(self, rhs).for_each(|(lhs, rhs)| lhs.[<$trait:snake:lower>](rhs));
                 }
             }
         }
@@ -179,8 +177,7 @@ macro_rules! impl_element_wise_op {
                 type Output = $out;
 
                 fn [<$trait:lower>](self, rhs: $rhs) -> Self::Output {
-                    assert_eq!(self.len(), rhs.len());
-                    izip!(self, rhs).map(|(lhs, rhs)| lhs.[<$trait:lower>](rhs)).collect()
+                    crate::util::izip_eq!(self, rhs).map(|(lhs, rhs)| lhs.[<$trait:lower>](rhs)).collect()
                 }
             }
         }

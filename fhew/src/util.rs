@@ -1,5 +1,4 @@
 use core::{f64::consts::SQRT_2, iter::Sum, ops::Mul};
-use itertools::Itertools;
 use rand_distr::{Distribution, Standard, WeightedIndex};
 
 mod avec;
@@ -29,7 +28,7 @@ where
     type Output = L;
 
     fn dot(self, rhs: IR) -> Self::Output {
-        L::sum(self.into_iter().zip_eq(rhs).map(|(lhs, rhs)| lhs * rhs))
+        L::sum(izip_eq!(self, rhs).map(|(lhs, rhs)| lhs * rhs))
     }
 }
 
@@ -71,3 +70,67 @@ pub fn dg(std_dev: f64, n: usize) -> impl Distribution<i8> {
         .unwrap()
         .map(move |v| v as i8 - max)
 }
+
+#[macro_export]
+macro_rules! izip_eq {
+    (@closure $p:pat => $tup:expr) => {
+        |$p| $tup
+    };
+    (@closure $p:pat => ($($tup:tt)*) , $_iter:expr $(, $tail:expr)*) => {
+        $crate::util::izip_eq!(@closure ($p, b) => ($($tup)*, b) $(, $tail)*)
+    };
+    ($first:expr $(,)*) => {
+        itertools::__std_iter::IntoIterator::into_iter($first)
+    };
+    ($first:expr, $second:expr $(,)*) => {
+        itertools::Itertools::zip_eq($crate::util::izip_eq!($first), $second)
+    };
+    ($first:expr $(, $rest:expr)* $(,)*) => {{
+        let t = $crate::util::izip_eq!($first);
+        $(let t = $crate::util::izip_eq!(t, $rest);)*
+        t.map($crate::util::izip_eq!(@closure a => (a) $(, $rest)*))
+    }};
+}
+
+#[macro_export]
+macro_rules! zipstar {
+    ($iters:expr $(, $field:tt)?) => {{
+        let mut iters = $iters
+            .into_iter()
+            .map(|iter| iter$(.$field)?.into_iter())
+            .collect::<Vec<_>>();
+        let size_hint = itertools::Itertools::unique(iters.iter().map(|iter| iter.size_hint()))
+            .collect::<Vec<_>>();
+        assert_eq!(size_hint.len(), 1);
+        core::iter::repeat_with(move || {
+            iters
+                .iter_mut()
+                .map(|iter| iter.next().unwrap())
+                .collect::<Vec<_>>()
+        })
+        .take(size_hint[0].1.unwrap())
+    }};
+}
+
+#[macro_export]
+macro_rules! cartesian {
+    (@closure $p:pat => $tup:expr) => {
+        |$p| $tup
+    };
+    (@closure $p:pat => ($($tup:tt)*) , $_iter:expr $(, $tail:expr)*) => {
+        $crate::util::cartesian!(@closure ($p, b) => ($($tup)*, b) $(, $tail)*)
+    };
+    ($first:expr $(,)*) => {
+        itertools::__std_iter::IntoIterator::into_iter($first)
+    };
+    ($first:expr, $second:expr $(,)*) => {
+        itertools::Itertools::cartesian_product($crate::util::cartesian!($first), $second)
+    };
+    ($first:expr $(, $rest:expr)* $(,)*) => {
+        let t = $crate::util::cartesian_product!($first);
+        $(let t = $crate::util::cartesian_product!(t, $rest);)*
+        t.map($crate::util::cartesian_product!(@closure a => (a) $(, $rest)*))
+    };
+}
+
+pub use {cartesian, izip_eq, zipstar};

@@ -26,11 +26,11 @@ impl Decomposor {
         self.d
     }
 
-    pub fn log_bases(&self) -> impl Iterator<Item = usize> {
+    pub fn log_bases(&self) -> impl Iterator<Item = usize> + Clone {
         (self.rounding_bits..).step_by(self.log_b).take(self.d)
     }
 
-    pub fn bases(&self) -> impl Iterator<Item = Fq> + '_ {
+    pub fn bases(&self) -> impl Iterator<Item = Fq> + Clone + '_ {
         self.log_bases().map(|bits| Fq::from_u64(self.q, 1 << bits))
     }
 

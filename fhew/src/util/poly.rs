@@ -4,6 +4,7 @@ use crate::util::{
         impl_mul_assign_element, impl_mul_element, AVec,
     },
     fq::{Fq, NEG_NTT_PSI},
+    izip_eq,
 };
 use core::{
     borrow::Borrow,
@@ -209,8 +210,7 @@ impl MulAssign<&Poly<Fq, Coefficient>> for Poly<Fq, Coefficient> {
 
 impl MulAssign<&Poly<Fq, Evaluation>> for Poly<Fq, Evaluation> {
     fn mul_assign(&mut self, rhs: &Poly<Fq, Evaluation>) {
-        assert_eq!(self.len(), rhs.len());
-        izip!(self, rhs).for_each(|(lhs, rhs)| *lhs *= rhs);
+        izip_eq!(self, rhs).for_each(|(lhs, rhs)| *lhs *= rhs);
     }
 }
 
