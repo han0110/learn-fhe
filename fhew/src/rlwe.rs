@@ -231,8 +231,8 @@ impl Rlwe {
         sk: &RlweSecretKey,
         rng: &mut impl RngCore,
     ) -> RlwePublicKeyShare {
-        let e = Poly::sample_fq_from_i8(param.n(), param.q(), &dg(3.2, 6), rng);
-        let b = a * &sk.0 + e;
+        let zero = RlwePlaintext(Poly::zero(param.n(), param.q()));
+        let RlweEncryptionShare(b) = Rlwe::share_encrypt(param, a, sk, zero, rng);
         RlwePublicKeyShare(b)
     }
 
