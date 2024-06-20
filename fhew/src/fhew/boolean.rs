@@ -45,15 +45,12 @@ macro_rules! impl_op {
     ($(fn $op:ident(&self $(,)? $($other:ident),*));* $(;)?) => {
         $(
             paste::paste! {
-                impl<T: Borrow<BootstrappingKey>> FhewBool<T> {
+                impl<T: Borrow<BootstrappingKey> + Copy> FhewBool<T> {
                     pub fn [<bit $op _assign>](&mut self, $($other: &Self),*) {
                         self.ct = Fhew::$op(self.bk.borrow(), self.ct.clone(), $($other.ct.clone()),*);
                     }
 
-                    pub fn [<bit $op>](&self, $($other: &Self),*) -> Self
-                    where
-                        T: Clone
-                    {
+                    pub fn [<bit $op>](&self, $($other: &Self),*) -> Self {
                         let mut lhs = self.clone();
                         lhs.[<bit $op _assign>]($($other),*);
                         lhs
@@ -75,7 +72,7 @@ impl_op!(
     fn majority(&self, another, the_other);
 );
 
-impl<T: Borrow<BootstrappingKey>> Not for FhewBool<T> {
+impl<T: Borrow<BootstrappingKey> + Copy> Not for FhewBool<T> {
     type Output = FhewBool<T>;
 
     fn not(mut self) -> Self::Output {
@@ -84,7 +81,7 @@ impl<T: Borrow<BootstrappingKey>> Not for FhewBool<T> {
     }
 }
 
-impl<T: Clone + Borrow<BootstrappingKey>> Not for &FhewBool<T> {
+impl<T: Borrow<BootstrappingKey> + Copy> Not for &FhewBool<T> {
     type Output = FhewBool<T>;
 
     fn not(self) -> Self::Output {
@@ -93,9 +90,9 @@ impl<T: Clone + Borrow<BootstrappingKey>> Not for &FhewBool<T> {
 }
 
 macro_rules! impl_core_op {
-    (@ impl<T $(: $generic:tt)?> $trait:ident<$rhs:ty> for $lhs:ty; $lhs_convert:expr) => {
+    (@ impl<T> $trait:ident<$rhs:ty> for $lhs:ty; $lhs_convert:expr) => {
         paste::paste! {
-            impl<T: Borrow<BootstrappingKey> $(+ $generic)?> core::ops::$trait<$rhs> for $lhs {
+            impl<T: Borrow<BootstrappingKey> + Copy> core::ops::$trait<$rhs> for $lhs {
                 type Output = FhewBool<T>;
 
                 fn [<$trait:lower>](self, rhs: $rhs) -> Self::Output {
@@ -109,12 +106,12 @@ macro_rules! impl_core_op {
     ($(impl<T> $trait:ident<$rhs:ty> for $lhs:ty),* $(,)?) => {
         $(
             paste::paste! {
-                impl<T: Borrow<BootstrappingKey>> core::ops::[<$trait Assign>]<$rhs> for $lhs {
+                impl<T: Borrow<BootstrappingKey> + Copy> core::ops::[<$trait Assign>]<$rhs> for $lhs {
                     fn [<$trait:lower _assign>](&mut self, rhs: $rhs) {
                         self.[<$trait:lower _assign>](&rhs);
                     }
                 }
-                impl<T: Borrow<BootstrappingKey>> core::ops::[<$trait Assign>]<&$rhs> for $lhs {
+                impl<T: Borrow<BootstrappingKey> + Copy> core::ops::[<$trait Assign>]<&$rhs> for $lhs {
                     fn [<$trait:lower _assign>](&mut self, rhs: &$rhs) {
                         self.[<$trait:lower _assign>](rhs);
                     }
@@ -122,8 +119,8 @@ macro_rules! impl_core_op {
             }
             impl_core_op!(@ impl<T> $trait<$rhs> for $lhs; core::convert::identity);
             impl_core_op!(@ impl<T> $trait<&$rhs> for $lhs; core::convert::identity);
-            impl_core_op!(@ impl<T: Clone> $trait<$rhs> for &$lhs; <_>::clone);
-            impl_core_op!(@ impl<T: Clone> $trait<&$rhs> for &$lhs; <_>::clone);
+            impl_core_op!(@ impl<T> $trait<$rhs> for &$lhs; <_>::clone);
+            impl_core_op!(@ impl<T> $trait<&$rhs> for &$lhs; <_>::clone);
         )*
     }
 }
@@ -134,7 +131,7 @@ impl_core_op!(
     impl<T> BitXor<FhewBool<T>> for FhewBool<T>,
 );
 
-impl<T: Borrow<BootstrappingKey> + Clone> FhewBool<T> {
+impl<T: Borrow<BootstrappingKey> + Copy> FhewBool<T> {
     pub fn overflowing_add(&self, rhs: &Self) -> (Self, Self) {
         let sum = self ^ rhs;
         let carry = self & rhs;
@@ -159,6 +156,18 @@ impl<T: Borrow<BootstrappingKey> + Clone> FhewBool<T> {
         let diff = t ^ borrow;
         let borrow = (!self & rhs) | (!t & borrow);
         (diff, borrow)
+    }
+}
+
+impl<T: Borrow<BootstrappingKey> + Copy> FhewBool<T> {
+    pub(crate) fn carrying_add_assign(&mut self, rhs: &Self, carry: &mut Self) {
+        (*self, *carry) = self.carrying_add(rhs, carry);
+    }
+
+    pub(crate) fn overflowing_add_assign(&mut self, rhs: &Self) -> Self {
+        let (sum, carry) = self.overflowing_add(rhs);
+        *self = sum;
+        carry
     }
 }
 

@@ -5,6 +5,7 @@ use crate::{
     rlwe::RlwePublicKey,
 };
 use core::{array::from_fn, borrow::Borrow, ops::Not};
+use itertools::izip;
 use rand::RngCore;
 use std::borrow::Cow;
 
@@ -28,7 +29,7 @@ impl<T: Borrow<BootstrappingParam> + Copy> FhewU8<T> {
     }
 }
 
-impl<T: Borrow<BootstrappingKey>> Not for FhewU8<T> {
+impl<T: Borrow<BootstrappingKey> + Copy> Not for FhewU8<T> {
     type Output = FhewU8<T>;
 
     fn not(mut self) -> Self::Output {
@@ -37,7 +38,7 @@ impl<T: Borrow<BootstrappingKey>> Not for FhewU8<T> {
     }
 }
 
-impl<T: Borrow<BootstrappingKey> + Clone> Not for &FhewU8<T> {
+impl<T: Borrow<BootstrappingKey> + Copy> Not for &FhewU8<T> {
     type Output = FhewU8<T>;
 
     fn not(self) -> Self::Output {
@@ -45,28 +46,28 @@ impl<T: Borrow<BootstrappingKey> + Clone> Not for &FhewU8<T> {
     }
 }
 
-impl<T: Borrow<BootstrappingKey> + Clone> FhewU8<T> {
+impl<T: Borrow<BootstrappingKey> + Copy> FhewU8<T> {
     pub fn overflowing_add(&self, rhs: &Self) -> (Self, FhewBool<T>) {
-        let (lhs, rhs, mut carry_in) = (&self.0, &rhs.0, None);
+        let (lhs, rhs, mut carry) = (self.0.each_ref(), rhs.0.each_ref(), None);
         let sum = from_fn(|i| {
-            let (sum, carry_out) = match carry_in.take() {
-                Some(carry_in) => lhs[i].carrying_add(&rhs[i], &carry_in),
-                None => lhs[i].overflowing_add(&rhs[i]),
+            let (sum, carry_out) = match carry.take() {
+                Some(carry) => lhs[i].carrying_add(rhs[i], &carry),
+                None => lhs[i].overflowing_add(rhs[i]),
             };
-            carry_in = Some(carry_out);
+            carry = Some(carry_out);
             sum
         });
-        (Self(sum), carry_in.unwrap())
+        (Self(sum), carry.unwrap())
     }
 
     pub fn carrying_add(&self, rhs: &Self, carry: &FhewBool<T>) -> (Self, FhewBool<T>) {
-        let (lhs, rhs, mut carry_in) = (&self.0, &rhs.0, Cow::Borrowed(carry));
+        let (lhs, rhs, mut carry) = (self.0.each_ref(), rhs.0.each_ref(), Cow::Borrowed(carry));
         let sum = from_fn(|i| {
-            let (sum, carry_out) = lhs[i].carrying_add(&rhs[i], &carry_in);
-            carry_in = Cow::Owned(carry_out);
+            let (sum, carry_out) = lhs[i].carrying_add(rhs[i], &carry);
+            carry = Cow::Owned(carry_out);
             sum
         });
-        (Self(sum), carry_in.into_owned())
+        (Self(sum), carry.into_owned())
     }
 
     pub fn wrapping_add(&self, rhs: &Self) -> Self {
@@ -74,26 +75,26 @@ impl<T: Borrow<BootstrappingKey> + Clone> FhewU8<T> {
     }
 
     pub fn overflowing_sub(&self, rhs: &Self) -> (Self, FhewBool<T>) {
-        let (lhs, rhs, mut borrow_in) = (&self.0, &rhs.0, None);
+        let (lhs, rhs, mut borrow) = (self.0.each_ref(), rhs.0.each_ref(), None);
         let sum = from_fn(|i| {
-            let (sum, borrow_out) = match borrow_in.take() {
-                Some(borrow_in) => lhs[i].borrowing_sub(&rhs[i], &borrow_in),
-                None => lhs[i].overflowing_sub(&rhs[i]),
+            let (sum, borrow_out) = match borrow.take() {
+                Some(borrow) => lhs[i].borrowing_sub(rhs[i], &borrow),
+                None => lhs[i].overflowing_sub(rhs[i]),
             };
-            borrow_in = Some(borrow_out);
+            borrow = Some(borrow_out);
             sum
         });
-        (Self(sum), borrow_in.unwrap())
+        (Self(sum), borrow.unwrap())
     }
 
     pub fn borrowing_sub(&self, rhs: &Self, borrow: &FhewBool<T>) -> (Self, FhewBool<T>) {
-        let (lhs, rhs, mut borrow_in) = (&self.0, &rhs.0, Cow::Borrowed(borrow));
+        let (lhs, rhs, mut borrow) = (self.0.each_ref(), rhs.0.each_ref(), Cow::Borrowed(borrow));
         let diff = from_fn(|i| {
-            let (diff, borrow_out) = lhs[i].borrowing_sub(&rhs[i], &borrow_in);
-            borrow_in = Cow::Owned(borrow_out);
+            let (diff, borrow_out) = lhs[i].borrowing_sub(rhs[i], &borrow);
+            borrow = Cow::Owned(borrow_out);
             diff
         });
-        (Self(diff), borrow_in.into_owned())
+        (Self(diff), borrow.into_owned())
     }
 
     pub fn wrapping_sub(&self, rhs: &Self) -> Self {
@@ -101,20 +102,15 @@ impl<T: Borrow<BootstrappingKey> + Clone> FhewU8<T> {
     }
 
     pub fn wrapping_mul(&self, rhs: &Self) -> Self {
-        let (lhs, rhs, mut carries) = (&self.0, &rhs.0, Vec::with_capacity(7));
+        let (lhs, rhs, mut carries) = (self.0.each_ref(), rhs.0.each_ref(), [const { None }; 7]);
         let product = from_fn(|i| {
-            let t0 = &lhs[0] & &rhs[i];
-            (1..=i).fold(t0, |mut sum, j| {
-                let tj = &lhs[j] & &rhs[i - j];
-                if j != i {
-                    (sum, carries[j - 1]) = sum.carrying_add(&tj, &carries[j - 1]);
-                } else {
-                    let carry_out;
-                    (sum, carry_out) = sum.overflowing_add(&tj);
-                    carries.push(carry_out);
-                }
-                sum
-            })
+            let mut t = (0..=i).map(|j| lhs[j] & rhs[i - j]);
+            let mut sum = t.next().unwrap();
+            izip!(t, &mut carries).for_each(|(tj, carry)| match carry {
+                Some(carry) => sum.carrying_add_assign(&tj, carry),
+                _ => *carry = Some(sum.overflowing_add_assign(&tj)),
+            });
+            sum
         });
         Self(product)
     }
@@ -123,7 +119,7 @@ impl<T: Borrow<BootstrappingKey> + Clone> FhewU8<T> {
 macro_rules! impl_core_op {
     (@ impl<T> $trait:ident<$rhs:ty> for $lhs:ty) => {
         paste::paste! {
-            impl<T: Borrow<BootstrappingKey> + Clone> core::ops::$trait<$rhs> for $lhs {
+            impl<T: Borrow<BootstrappingKey> + Copy> core::ops::$trait<$rhs> for $lhs {
                 type Output = FhewU8<T>;
 
                 fn [<$trait:lower>](self, rhs: $rhs) -> Self::Output {
@@ -135,12 +131,12 @@ macro_rules! impl_core_op {
     ($(impl<T> $trait:ident<$rhs:ty> for $lhs:ty),* $(,)?) => {
         $(
             paste::paste! {
-                impl<T: Borrow<BootstrappingKey> + Clone> core::ops::[<$trait Assign>]<&$rhs> for $lhs {
+                impl<T: Borrow<BootstrappingKey> + Copy> core::ops::[<$trait Assign>]<&$rhs> for $lhs {
                     fn [<$trait:lower _assign>](&mut self, rhs: &$rhs) {
                         *self = self.[<wrapping_ $trait:lower>](rhs);
                     }
                 }
-                impl<T: Borrow<BootstrappingKey> + Clone> core::ops::[<$trait Assign>]<$rhs> for $lhs {
+                impl<T: Borrow<BootstrappingKey> + Copy> core::ops::[<$trait Assign>]<$rhs> for $lhs {
                     fn [<$trait:lower _assign>](&mut self, rhs: $rhs) {
                         *self = self.[<wrapping_ $trait:lower>](&rhs);
                     }
