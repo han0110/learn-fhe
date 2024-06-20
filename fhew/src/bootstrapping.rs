@@ -8,7 +8,8 @@ use crate::{
     rlwe::{Rlwe, RlweAutoKey, RlweAutoKeyShare, RlweCiphertext, RlwePlaintext, RlwePublicKey},
     util::{zipstar, AVec, Fq, Poly, X},
 };
-use core::iter::repeat_with;
+use core::{borrow::Borrow, iter::repeat_with};
+use derive_more::Deref;
 use itertools::{chain, izip, Itertools};
 use rand::RngCore;
 use std::collections::HashMap;
@@ -90,11 +91,19 @@ impl BootstrappingParam {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deref)]
 pub struct BootstrappingKey {
+    #[deref]
+    param: BootstrappingParam,
     ksk: LweKeySwitchingKey,
     brk: Vec<RgswCiphertext>,
     ak: AVec<RlweAutoKey>,
+}
+
+impl Borrow<BootstrappingParam> for &BootstrappingKey {
+    fn borrow(&self) -> &BootstrappingParam {
+        self
+    }
 }
 
 impl Bootstrapping {
@@ -116,21 +125,21 @@ impl Bootstrapping {
             .ak_t()
             .map(|t| Rlwe::ak_gen(param.rgsw(), t, &z.into(), rng))
             .collect();
-        BootstrappingKey { ksk, brk, ak }
+        BootstrappingKey {
+            param: *param,
+            ksk,
+            brk,
+            ak,
+        }
     }
 
     // Figure 2 in 2022/198.
-    pub fn bootstrap(
-        param: &BootstrappingParam,
-        bk: &BootstrappingKey,
-        f: &Poly<Fq>,
-        ct: LweCiphertext,
-    ) -> LweCiphertext {
-        let ct = ct.mod_switch(param.big_q_ks());
-        let ct = Lwe::key_switch(param.lwe_s(), &bk.ksk, ct);
-        let ct = ct.mod_switch_odd(param.q());
-        let ct = Bootstrapping::blind_rotate(param, &bk.brk, &bk.ak, f, ct);
-        Rlwe::sample_extract(param.rgsw(), ct, 0)
+    pub fn bootstrap(bk: &BootstrappingKey, f: &Poly<Fq>, ct: LweCiphertext) -> LweCiphertext {
+        let ct = ct.mod_switch(bk.big_q_ks());
+        let ct = Lwe::key_switch(bk.lwe_s(), &bk.ksk, ct);
+        let ct = ct.mod_switch_odd(bk.q());
+        let ct = Bootstrapping::blind_rotate(&bk.param, &bk.brk, &bk.ak, f, ct);
+        Rlwe::sample_extract(bk.rgsw(), ct, 0)
     }
 
     // Algorithm 7 in 2022/198.
@@ -291,6 +300,11 @@ impl Bootstrapping {
                 .map(|(t, crs, ak_share)| Rlwe::ak_share_merge(param.rgsw(), t, crs, ak_share))
                 .collect()
         };
-        BootstrappingKey { ksk, brk, ak }
+        BootstrappingKey {
+            param: *param,
+            ksk,
+            brk,
+            ak,
+        }
     }
 }

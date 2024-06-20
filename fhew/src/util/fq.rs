@@ -221,7 +221,7 @@ macro_rules! impl_op {
                 type Output = Fq;
 
                 #[inline(always)]
-                fn [<$trait:lower>](self, rhs: $rhs) -> Fq {
+                fn [<$trait:lower>](self, rhs: $rhs) -> Self::Output {
                     let mut lhs = $lhs_convert(self);
                     lhs.[<$trait:lower _assign>](rhs.borrow());
                     lhs
