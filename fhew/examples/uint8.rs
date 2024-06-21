@@ -1,8 +1,4 @@
-use core::{
-    array::from_fn,
-    num::Wrapping,
-    ops::{Add, Mul, Sub},
-};
+use core::{array::from_fn, num::Wrapping};
 use fhew::{
     bootstrapping::{Bootstrapping, BootstrappingParam},
     fhew::FhewU8,
@@ -11,6 +7,7 @@ use fhew::{
     rlwe::{Rlwe, RlweParam},
     util::two_adic_primes,
 };
+use num_traits::NumOps;
 use rand::{rngs::OsRng, Rng};
 
 const N: usize = 2;
@@ -31,8 +28,8 @@ fn multi_key_param() -> BootstrappingParam {
     BootstrappingParam::new(rgsw, lwe, w)
 }
 
-fn foo<T: Clone + Add<Output = T> + Sub<Output = T> + Mul<Output = T>>(a: T, b: T) -> T {
-    (a.clone() + b.clone()) * (a - b)
+fn foo<T: Clone + NumOps>(a: T, b: T) -> T {
+    (a.clone() + b.clone()) * a / b
 }
 
 fn main() {
@@ -55,7 +52,7 @@ fn main() {
         ct.decryption_share_merge(d_shares)
     };
 
-    let [m0, m1] = from_fn(|_| Wrapping(rng.gen::<u8>()));
+    let [m0, m1] = from_fn(|_| Wrapping(rng.gen_range(1..=u8::MAX)));
     let [ct0, ct1] = [m0, m1].map(|m| FhewU8::pk_encrypt(&bk, &pk, m.0, &mut rng));
 
     assert_eq!(foo(m0, m1).0, decrypt(foo(ct0, ct1)));

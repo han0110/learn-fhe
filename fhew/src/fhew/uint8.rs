@@ -8,7 +8,7 @@ use crate::{
 use core::{array::from_fn, borrow::Borrow, ops::Not};
 use itertools::{izip, Itertools};
 use rand::RngCore;
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::VecDeque};
 
 #[derive(Clone, Debug)]
 pub struct FhewU8<T>([FhewBool<T>; 8]);
@@ -48,6 +48,20 @@ impl<T: Borrow<BootstrappingKey> + Copy> Not for &FhewU8<T> {
 }
 
 impl<T: Borrow<BootstrappingKey> + Copy> FhewU8<T> {
+    pub fn wrapping_neg(&self) -> Self {
+        let v = self.0.each_ref();
+        let mut carry = !v[0];
+        let neg = from_fn(|i| {
+            let sum;
+            match i {
+                0 => sum = v[0].clone(),
+                _ => (sum, carry) = (!v[i]).overflowing_add(&carry),
+            };
+            sum
+        });
+        Self(neg)
+    }
+
     pub fn overflowing_add(&self, rhs: &Self) -> (Self, FhewBool<T>) {
         let (lhs, rhs, mut carry) = (self.0.each_ref(), rhs.0.each_ref(), None);
         let sum = from_fn(|i| {
@@ -115,6 +129,37 @@ impl<T: Borrow<BootstrappingKey> + Copy> FhewU8<T> {
         });
         Self(product)
     }
+
+    pub fn div_rem(&self, rhs: &Self) -> (Self, Self) {
+        let (lhs, neg_rhs) = (self.0.each_ref(), rhs.wrapping_neg().0);
+        let [mut q, mut r, mut d] = from_fn(|_| VecDeque::with_capacity(8));
+        for i in 0..8 {
+            r.push_front(lhs[7 - i].clone());
+            d.clone_from(&r);
+
+            let mut carry = d[0].overflowing_add_assign(&neg_rhs[0]);
+            izip!(1.., &neg_rhs[1..]).for_each(|(j, neg_rhs)| match d.get_mut(j) {
+                Some(d) => d.carrying_add_assign(neg_rhs, &mut carry),
+                None => carry.bitand_assign(neg_rhs),
+            });
+
+            izip!(&mut r, &d).for_each(|(r, d)| *r = carry.select(r, d));
+
+            q.push_front(carry);
+        }
+        let [q, r] = [q, r].map(|mut v| Self(from_fn(|_| v.pop_front().unwrap())));
+        (q, r)
+    }
+
+    pub fn wrapping_div(&self, rhs: &Self) -> Self {
+        let (q, _) = self.div_rem(rhs);
+        q
+    }
+
+    pub fn wrapping_rem(&self, rhs: &Self) -> Self {
+        let (_, r) = self.div_rem(rhs);
+        r
+    }
 }
 
 macro_rules! impl_core_op {
@@ -155,6 +200,8 @@ impl_core_op!(
     impl<T> Add<FhewU8<T>> for FhewU8<T>,
     impl<T> Sub<FhewU8<T>> for FhewU8<T>,
     impl<T> Mul<FhewU8<T>> for FhewU8<T>,
+    impl<T> Div<FhewU8<T>> for FhewU8<T>,
+    impl<T> Rem<FhewU8<T>> for FhewU8<T>,
 );
 
 macro_rules! impl_wrapping_op {
@@ -214,6 +261,7 @@ mod test {
         lwe::Lwe,
         rlwe::Rlwe,
     };
+    use num_integer::Integer;
     use rand::{thread_rng, Rng};
 
     trait CarryingAdd: Sized {
@@ -266,9 +314,6 @@ mod test {
         let encrypt_u8 = |m| FhewU8::sk_encrypt(&bk, &sk, m, &mut thread_rng());
 
         macro_rules! assert_decrypted_to {
-            ($ct0:ident $op:tt $ct1:ident, $m:expr) => {
-                assert_eq!(($ct0 $op $ct1).decrypt(&sk), $m);
-            };
             ($ct:expr, $m:expr) => {
                 let (t0, t1) = $ct;
                 assert_eq!((t0.decrypt(&sk), t1.decrypt(&sk)), $m);
@@ -282,13 +327,15 @@ mod test {
         for _ in 0..4 {
             let (m0, m1, m2) = (rng.gen(), rng.gen(), rng.gen());
             let (ct0, ct1, ct2) = &(encrypt_u8(m0), encrypt_u8(m1), encrypt_bool(m2));
-            assert_decrypted_to!(ct0.overflowing_add(ct1), m0.overflowing_add(m1));
             assert_decrypted_to!(ct0.carrying_add(ct1, ct2), m0.carrying_add(m1, m2));
-            assert_decrypted_to!(ct0 + ct1, m0.wrapping_add(m1));
-            assert_decrypted_to!(ct0.overflowing_sub(ct1), m0.overflowing_sub(m1));
             assert_decrypted_to!(ct0.borrowing_sub(ct1, ct2), m0.borrowing_sub(m1, m2));
-            assert_decrypted_to!(ct0 - ct1, m0.wrapping_sub(m1));
-            assert_decrypted_to!(ct0 * ct1, m0.wrapping_mul(m1));
+            assert_decrypted_to!(ct0.overflowing_add(ct1), m0.overflowing_add(m1));
+            assert_decrypted_to!(ct0.overflowing_sub(ct1), m0.overflowing_sub(m1));
+            assert_decrypted_to!(ct0.div_rem(ct1), m0.div_rem(&m1));
+            assert_eq!(ct0.wrapping_neg().decrypt(&sk), m0.wrapping_neg());
+            assert_eq!(ct0.wrapping_add(ct1).decrypt(&sk), m0.wrapping_add(m1));
+            assert_eq!(ct0.wrapping_sub(ct1).decrypt(&sk), m0.wrapping_sub(m1));
+            assert_eq!(ct0.wrapping_mul(ct1).decrypt(&sk), m0.wrapping_mul(m1));
         }
     }
 }

@@ -132,6 +132,10 @@ impl_core_op!(
 );
 
 impl<T: Borrow<BootstrappingKey> + Copy> FhewBool<T> {
+    pub fn select(&self, f: &Self, t: &Self) -> Self {
+        (!self & f) | (self & t)
+    }
+
     pub fn overflowing_add(&self, rhs: &Self) -> (Self, Self) {
         let sum = self ^ rhs;
         let carry = self & rhs;
