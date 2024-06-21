@@ -341,7 +341,7 @@ pub(crate) mod test {
     };
     use core::{array::from_fn, ops::Range};
     use itertools::izip;
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::thread_rng;
 
     pub(crate) fn testing_n_q(
         log_n_range: Range<usize>,
@@ -352,7 +352,7 @@ pub(crate) mod test {
 
     #[test]
     fn encrypt_decrypt() {
-        let mut rng = StdRng::from_entropy();
+        let mut rng = thread_rng();
         let (log_n_range, log_q, p) = (0..10, 45, 1 << 4);
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RlweParam::new(q, p, log_n);
@@ -369,7 +369,7 @@ pub(crate) mod test {
 
     #[test]
     fn add_sub() {
-        let mut rng = StdRng::from_entropy();
+        let mut rng = thread_rng();
         let (log_n_range, log_q, p) = (0..10, 45, 1 << 4);
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RlweParam::new(q, p, log_n);
@@ -386,7 +386,7 @@ pub(crate) mod test {
 
     #[test]
     fn key_switch() {
-        let mut rng = StdRng::from_entropy();
+        let mut rng = thread_rng();
         let (log_n_range, log_q, p, log_b, d) = (0..10, 45, 1 << 4, 5, 9);
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param0 = RlweParam::new(q, p, log_n);
@@ -404,7 +404,7 @@ pub(crate) mod test {
 
     #[test]
     fn automorphism() {
-        let mut rng = StdRng::from_entropy();
+        let mut rng = thread_rng();
         let (log_n_range, log_q, p, log_b, d) = (0..10, 45, 1 << 4, 5, 9);
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             for t in [-Rlwe::AUTO_G, Rlwe::AUTO_G] {
@@ -425,7 +425,7 @@ pub(crate) mod test {
 
     #[test]
     fn sample_extract() {
-        let mut rng = StdRng::from_entropy();
+        let mut rng = thread_rng();
         let (log_n_range, log_q, p) = (0..10, 45, 1 << 4);
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RlweParam::new(q, p, log_n);
@@ -445,16 +445,15 @@ pub(crate) mod test {
     fn multi_key_encrypt_decrypt() {
         const N: usize = 3;
 
-        let mut rng = StdRng::from_entropy();
+        let mut rng = thread_rng();
         let (log_n_range, log_q, p) = (0..10, 45, 1 << 4);
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RlweParam::new(q, p, log_n);
             let a = Poly::sample_fq_uniform(param.n(), param.q(), &mut rng);
             let sk_shares: [_; N] = from_fn(|_| Rlwe::sk_gen(&param, &mut rng));
             let pk = {
-                let pk_shares = sk_shares
-                    .each_ref()
-                    .map(|sk| Rlwe::pk_share_gen(&param, &a, sk, &mut rng));
+                let pk_share_gen = |sk| Rlwe::pk_share_gen(&param, &a, sk, &mut rng);
+                let pk_shares = sk_shares.each_ref().map(pk_share_gen);
                 Rlwe::pk_share_merge(&param, a, pk_shares)
             };
             let m = Poly::sample_fq_uniform(param.n(), p, &mut rng);

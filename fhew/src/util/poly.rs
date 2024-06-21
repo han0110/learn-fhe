@@ -452,11 +452,11 @@ mod test {
         poly::{neg_schoolbook_mul, Poly},
     };
     use core::array::from_fn;
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::thread_rng;
 
     #[test]
     fn neg_mul() {
-        let mut rng = StdRng::from_entropy();
+        let mut rng = thread_rng();
         for log_n in 0..10 {
             let n = 1 << log_n;
             for q in two_adic_primes(45, log_n + 1).take(10) {

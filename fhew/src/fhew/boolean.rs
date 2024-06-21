@@ -206,7 +206,7 @@ pub(crate) mod test {
         util::two_adic_primes,
     };
     use core::array::from_fn;
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::thread_rng;
 
     #[rustfmt::skip]
     mod tt {
@@ -236,7 +236,7 @@ pub(crate) mod test {
 
     #[test]
     fn encrypt_decrypt() {
-        let mut rng = StdRng::from_entropy();
+        let mut rng = thread_rng();
         let param = single_key_testing_param();
         let sk = Lwe::sk_gen(param.lwe_z(), &mut rng);
         let pk = Rlwe::pk_gen(param.rgsw(), &(&sk).into(), &mut rng);
@@ -251,10 +251,11 @@ pub(crate) mod test {
 
     #[test]
     fn op() {
-        let mut rng = StdRng::from_entropy();
+        let mut rng = thread_rng();
         let param = single_key_testing_param();
         let sk = Lwe::sk_gen(param.lwe_z(), &mut rng);
         let bk = Bootstrapping::key_gen(&param, &sk, &mut rng);
+        let encrypt = |m| FhewBool::sk_encrypt(&bk, &sk, m, &mut thread_rng());
 
         macro_rules! assert_decrypted_to {
             ($ct:expr, $m:expr) => {
@@ -264,12 +265,12 @@ pub(crate) mod test {
 
         for m in 0..1 << 1 {
             let m = m == 1;
-            let ct = FhewBool::sk_encrypt(&bk, &sk, m, &mut rng);
+            let ct = encrypt(m);
             assert_decrypted_to!(ct.bitnot(), !m);
         }
         for m in 0..1 << 2 {
             let [m0, m1] = from_fn(|i| (m >> i) & 1 == 1);
-            let [ct0, ct1] = &[m0, m1].map(|m| FhewBool::sk_encrypt(&bk, &sk, m, &mut rng));
+            let [ct0, ct1] = &[m0, m1].map(encrypt);
             assert_decrypted_to!(ct0.bitand(ct1), m0 & m1);
             assert_decrypted_to!(ct0.bitnand(ct1), !(m0 & m1));
             assert_decrypted_to!(ct0.bitor(ct1), m0 | m1);
@@ -279,18 +280,18 @@ pub(crate) mod test {
         }
         for m in 0..1 << 3 {
             let [m0, m1, m2] = from_fn(|i| (m >> i) & 1 == 1);
-            let [ct0, ct1, ct2] =
-                &[m0, m1, m2].map(|m| FhewBool::sk_encrypt(&bk, &sk, m, &mut rng));
+            let [ct0, ct1, ct2] = &[m0, m1, m2].map(encrypt);
             assert_decrypted_to!(ct0.bitmajority(ct1, ct2), (m0 & m1) | (m1 & m2) | (m2 & m0));
         }
     }
 
     #[test]
     fn add_sub() {
-        let mut rng = StdRng::from_entropy();
+        let mut rng = thread_rng();
         let param = single_key_testing_param();
         let sk = Lwe::sk_gen(param.lwe_z(), &mut rng);
         let bk = Bootstrapping::key_gen(&param, &sk, &mut rng);
+        let encrypt = |m| FhewBool::sk_encrypt(&bk, &sk, m, &mut thread_rng());
 
         macro_rules! assert_decrypted_to {
             ($ct:expr, $m:expr) => {
@@ -301,14 +302,13 @@ pub(crate) mod test {
 
         for m in 0..1 << 2 {
             let [m0, m1] = from_fn(|i| (m >> i) & 1 == 1);
-            let [ct0, ct1] = &[m0, m1].map(|m| FhewBool::sk_encrypt(&bk, &sk, m, &mut rng));
+            let [ct0, ct1] = &[m0, m1].map(encrypt);
             assert_decrypted_to!(ct0.overflowing_add(ct1), tt::OVERFLOWING_ADD[m]);
             assert_decrypted_to!(ct0.overflowing_sub(ct1), tt::OVERFLOWING_SUB[m]);
         }
         for m in 0..1 << 3 {
             let [m0, m1, m2] = from_fn(|i| (m >> i) & 1 == 1);
-            let [ct0, ct1, ct2] =
-                &[m0, m1, m2].map(|m| FhewBool::sk_encrypt(&bk, &sk, m, &mut rng));
+            let [ct0, ct1, ct2] = &[m0, m1, m2].map(encrypt);
             assert_decrypted_to!(ct0.carrying_add(ct1, ct2), tt::CARRYING_ADD[m]);
             assert_decrypted_to!(ct0.borrowing_sub(ct1, ct2), tt::BORROWING_SUB[m]);
         }
@@ -317,13 +317,13 @@ pub(crate) mod test {
     pub(crate) fn multi_key_testing_param() -> BootstrappingParam {
         let p = 4;
         let rgsw = {
-            let (log_q, log_n, log_b, d) = (60, 11, 6, 10);
+            let (log_q, log_n, log_b, d) = (54, 9, 6, 9);
             let q = two_adic_primes(log_q, log_n + 1).next().unwrap();
             let rlwe = RlweParam::new(q, p, log_n).with_decomposor(log_b, d);
             RgswParam::new(rlwe, log_b, d)
         };
         let lwe = {
-            let (n, q, log_b, d) = (500, 1 << 20, 4, 5);
+            let (n, q, log_b, d) = (100, 1 << 16, 4, 4);
             LweParam::new(q, p, n).with_decomposor(log_b, d)
         };
         let w = 10;
@@ -334,41 +334,39 @@ pub(crate) mod test {
     fn multi_key_op() {
         const N: usize = 3;
 
-        let mut rng = StdRng::from_entropy();
+        let mut rng = thread_rng();
         let param = multi_key_testing_param();
         let crs = Bootstrapping::crs_gen(&param, &mut rng);
         let sk_shares: [_; N] = from_fn(|_| Lwe::sk_gen(param.lwe_z(), &mut rng));
         let pk = {
-            let pk_shares = sk_shares
-                .each_ref()
-                .map(|sk| Rlwe::pk_share_gen(param.rgsw(), crs.pk(), &sk.into(), &mut rng));
+            let pk_share_gen = |sk| Rlwe::pk_share_gen(param.rgsw(), crs.pk(), &sk, &mut rng);
+            let pk_shares = sk_shares.each_ref().map(|sk| sk.into()).map(pk_share_gen);
             Rlwe::pk_share_merge(param.rgsw(), crs.pk().clone(), pk_shares)
         };
         let bk = {
-            let bk_shares = sk_shares
-                .each_ref()
-                .map(|sk| Bootstrapping::key_share_gen(&param, &crs, sk, &pk, &mut rng));
+            let bk_share_gen = |sk| Bootstrapping::key_share_gen(&param, &crs, sk, &pk, &mut rng);
+            let bk_shares = sk_shares.each_ref().map(bk_share_gen);
             Bootstrapping::key_share_merge(&param, crs, bk_shares)
         };
+        let encrypt = |m| FhewBool::pk_encrypt(&bk, &pk, m, &mut thread_rng());
 
         macro_rules! assert_decrypted_to {
             ($ct:expr, $m:expr) => {{
                 let ct = $ct;
-                let d_shares = sk_shares
-                    .each_ref()
-                    .map(|sk| ct.share_decrypt(sk, &mut rng));
+                let share_decrypt = |sk| ct.share_decrypt(sk, &mut rng);
+                let d_shares = sk_shares.each_ref().map(share_decrypt);
                 assert_eq!(ct.decryption_share_merge(d_shares), $m);
             }};
         }
 
         for m in 0..1 << 1 {
             let m = m == 1;
-            let ct = FhewBool::pk_encrypt(&bk, &pk, m, &mut rng);
+            let ct = encrypt(m);
             assert_decrypted_to!(ct.bitnot(), !m);
         }
         for m in 0..1 << 2 {
             let [m0, m1] = from_fn(|i| (m >> i) & 1 == 1);
-            let [ct0, ct1] = &[m0, m1].map(|m| FhewBool::pk_encrypt(&bk, &pk, m, &mut rng));
+            let [ct0, ct1] = &[m0, m1].map(encrypt);
             assert_decrypted_to!(ct0.bitand(ct1), m0 & m1);
             assert_decrypted_to!(ct0.bitnand(ct1), !(m0 & m1));
             assert_decrypted_to!(ct0.bitor(ct1), m0 | m1);
@@ -378,8 +376,7 @@ pub(crate) mod test {
         }
         for m in 0..1 << 3 {
             let [m0, m1, m2] = from_fn(|i| (m >> i) & 1 == 1);
-            let [ct0, ct1, ct2] =
-                &[m0, m1, m2].map(|m| FhewBool::pk_encrypt(&bk, &pk, m, &mut rng));
+            let [ct0, ct1, ct2] = &[m0, m1, m2].map(encrypt);
             assert_decrypted_to!(ct0.bitmajority(ct1, ct2), (m0 & m1) | (m1 & m2) | (m2 & m0));
         }
     }

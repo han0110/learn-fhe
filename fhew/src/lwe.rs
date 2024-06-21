@@ -251,11 +251,11 @@ mod test {
         util::Fq,
     };
     use itertools::Itertools;
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::thread_rng;
 
     #[test]
     fn encrypt_decrypt() {
-        let mut rng = StdRng::from_entropy();
+        let mut rng = thread_rng();
         let (q, p, n) = (1 << 16, 1 << 4, 1024);
         let param = LweParam::new(q, p, n);
         let sk = Lwe::sk_gen(&param, &mut rng);
@@ -269,7 +269,7 @@ mod test {
 
     #[test]
     fn add_sub() {
-        let mut rng = StdRng::from_entropy();
+        let mut rng = thread_rng();
         let (q, p, n) = (1 << 16, 1 << 4, 1024);
         let param = LweParam::new(q, p, n);
         let sk = Lwe::sk_gen(&param, &mut rng);
@@ -286,7 +286,7 @@ mod test {
 
     #[test]
     fn key_switch() {
-        let mut rng = StdRng::from_entropy();
+        let mut rng = thread_rng();
         let (q, p, n0, n1, log_b, d) = (1 << 16, 1 << 4, 1024, 512, 2, 8);
         let param0 = LweParam::new(q, p, n0);
         let param1 = LweParam::new(q, p, n1).with_decomposor(log_b, d);

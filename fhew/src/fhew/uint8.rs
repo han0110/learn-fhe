@@ -1,11 +1,12 @@
 use crate::{
     bootstrapping::{BootstrappingKey, BootstrappingParam},
-    fhew::boolean::FhewBool,
+    fhew::boolean::{FhewBool, FhewBoolDecryptionShare},
     lwe::LweSecretKey,
     rlwe::RlwePublicKey,
+    zipstar,
 };
 use core::{array::from_fn, borrow::Borrow, ops::Not};
-use itertools::izip;
+use itertools::{izip, Itertools};
 use rand::RngCore;
 use std::borrow::Cow;
 
@@ -25,7 +26,7 @@ impl<T: Borrow<BootstrappingParam> + Copy> FhewU8<T> {
 
     pub fn decrypt(self, sk: &LweSecretKey) -> u8 {
         let le_bits = self.0.into_iter().map(|bit| bit.decrypt(sk));
-        le_bits.rev().fold(0, |acc, bit| (acc << 1) | bit as u8)
+        u8_from_le_bits(le_bits)
     }
 }
 
@@ -156,6 +157,54 @@ impl_core_op!(
     impl<T> Mul<FhewU8<T>> for FhewU8<T>,
 );
 
+macro_rules! impl_wrapping_op {
+    ($(impl<T> $trait:ident for FhewU8<T>),* $(,)?) => {
+        $(
+            paste::paste! {
+                impl<T: Borrow<BootstrappingKey> + Copy> num_traits::$trait for FhewU8<T> {
+                    fn [<$trait:snake>](&self, rhs: &Self) -> Self {
+                        self.[<$trait:snake>](rhs)
+                    }
+                }
+            }
+        )*
+    }
+}
+
+impl_wrapping_op!(
+    impl<T> WrappingAdd for FhewU8<T>,
+    impl<T> WrappingSub for FhewU8<T>,
+    impl<T> WrappingMul for FhewU8<T>,
+);
+
+#[derive(Clone, Debug)]
+pub struct FhewU8DecryptionShare([FhewBoolDecryptionShare; 8]);
+
+impl<T: Borrow<BootstrappingParam>> FhewU8<T> {
+    pub fn share_decrypt(
+        &self,
+        sk: &LweSecretKey,
+        rng: &mut impl RngCore,
+    ) -> FhewU8DecryptionShare {
+        FhewU8DecryptionShare(self.0.each_ref().map(|bit| bit.share_decrypt(sk, rng)))
+    }
+
+    pub fn decryption_share_merge(
+        &self,
+        shares: impl IntoIterator<Item = FhewU8DecryptionShare>,
+    ) -> u8 {
+        let le_bits = izip!(&self.0, zipstar!(shares, 0))
+            .map(|(bit, shares)| bit.decryption_share_merge(shares))
+            .collect_vec();
+        u8_from_le_bits(le_bits)
+    }
+}
+
+fn u8_from_le_bits(le_bits: impl IntoIterator<Item = bool, IntoIter: DoubleEndedIterator>) -> u8 {
+    let be_bits = le_bits.into_iter().rev();
+    be_bits.fold(0, |acc, bit| (acc << 1) | bit as u8)
+}
+
 #[cfg(test)]
 #[allow(unstable_name_collisions)]
 mod test {
@@ -165,8 +214,7 @@ mod test {
         lwe::Lwe,
         rlwe::Rlwe,
     };
-    use core::array::from_fn;
-    use rand::{rngs::StdRng, Rng, SeedableRng};
+    use rand::{thread_rng, Rng};
 
     trait CarryingAdd: Sized {
         fn carrying_add(self, rhs: Self, carry: bool) -> (Self, bool);
@@ -196,7 +244,7 @@ mod test {
 
     #[test]
     fn encrypt_decrypt() {
-        let mut rng = StdRng::from_entropy();
+        let mut rng = thread_rng();
         let param = single_key_testing_param();
         let sk = Lwe::sk_gen(param.lwe_z(), &mut rng);
         let pk = Rlwe::pk_gen(param.rgsw(), &(&sk).into(), &mut rng);
@@ -209,24 +257,13 @@ mod test {
     }
 
     #[test]
-    fn not() {
-        let mut rng = StdRng::from_entropy();
-        let param = single_key_testing_param();
-        let sk = Lwe::sk_gen(param.lwe_z(), &mut rng);
-        let bk = Bootstrapping::key_gen(&param, &sk, &mut rng);
-
-        for m in 0..u8::MAX {
-            let ct = FhewU8::sk_encrypt(&bk, &sk, m, &mut rng);
-            assert_eq!((!ct).decrypt(&sk), !m);
-        }
-    }
-
-    #[test]
     fn op() {
-        let mut rng = StdRng::from_entropy();
+        let mut rng = thread_rng();
         let param = single_key_testing_param();
         let sk = Lwe::sk_gen(param.lwe_z(), &mut rng);
         let bk = Bootstrapping::key_gen(&param, &sk, &mut rng);
+        let encrypt_bool = |m| FhewBool::sk_encrypt(&bk, &sk, m, &mut thread_rng());
+        let encrypt_u8 = |m| FhewU8::sk_encrypt(&bk, &sk, m, &mut thread_rng());
 
         macro_rules! assert_decrypted_to {
             ($ct0:ident $op:tt $ct1:ident, $m:expr) => {
@@ -238,11 +275,13 @@ mod test {
             };
         }
 
+        for m in 0..u8::MAX {
+            let ct = encrypt_u8(m);
+            assert_eq!((!ct).decrypt(&sk), !m);
+        }
         for _ in 0..4 {
-            let [m0, m1] = from_fn(|_| rng.gen());
-            let [ct0, ct1] = &[m0, m1].map(|m| FhewU8::sk_encrypt(&bk, &sk, m, &mut rng));
-            let m2 = rng.gen();
-            let ct2 = &FhewBool::sk_encrypt(&bk, &sk, m2, &mut rng);
+            let (m0, m1, m2) = (rng.gen(), rng.gen(), rng.gen());
+            let (ct0, ct1, ct2) = &(encrypt_u8(m0), encrypt_u8(m1), encrypt_bool(m2));
             assert_decrypted_to!(ct0.overflowing_add(ct1), m0.overflowing_add(m1));
             assert_decrypted_to!(ct0.carrying_add(ct1, ct2), m0.carrying_add(m1, m2));
             assert_decrypted_to!(ct0 + ct1, m0.wrapping_add(m1));

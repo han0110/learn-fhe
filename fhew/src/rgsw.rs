@@ -153,11 +153,11 @@ mod test {
         util::Poly,
     };
     use core::array::from_fn;
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::thread_rng;
 
     #[test]
     fn encrypt_decrypt() {
-        let mut rng = StdRng::from_entropy();
+        let mut rng = thread_rng();
         let (log_n_range, log_q, p, log_b, d) = (0..10, 45, 1 << 4, 5, 9);
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RgswParam::new(RlweParam::new(q, p, log_n), log_b, d);
@@ -174,7 +174,7 @@ mod test {
 
     #[test]
     fn add_sub() {
-        let mut rng = StdRng::from_entropy();
+        let mut rng = thread_rng();
         let (log_n_range, log_q, p, log_b, d) = (0..10, 45, 1 << 4, 5, 9);
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RgswParam::new(RlweParam::new(q, p, log_n), log_b, d);
@@ -191,7 +191,7 @@ mod test {
 
     #[test]
     fn external_product() {
-        let mut rng = StdRng::from_entropy();
+        let mut rng = thread_rng();
         let (log_n_range, log_q, p, log_b, d) = (0..10, 45, 1 << 4, 5, 9);
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RgswParam::new(RlweParam::new(q, p, log_n), log_b, d);
@@ -207,7 +207,7 @@ mod test {
 
     #[test]
     fn internal_product() {
-        let mut rng = StdRng::from_entropy();
+        let mut rng = thread_rng();
         let (log_n_range, log_q, p, log_b, d) = (0..10, 45, 1 << 4, 5, 9);
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RgswParam::new(RlweParam::new(q, p, log_n), log_b, d);
