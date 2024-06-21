@@ -1,14 +1,14 @@
-use core::{array::from_fn, num::Wrapping};
+use core::{array::from_fn, borrow::Borrow, num::Wrapping};
 use fhew::{
-    bootstrapping::{Bootstrapping, BootstrappingParam},
+    bootstrapping::{Bootstrapping, BootstrappingKey, BootstrappingParam},
     fhew::FhewU8,
     lwe::{Lwe, LweParam},
     rgsw::RgswParam,
-    rlwe::{Rlwe, RlweParam},
+    rlwe::{Rlwe, RlweParam, RlwePublicKey},
     util::two_adic_primes,
 };
 use num_traits::NumOps;
-use rand::{rngs::OsRng, Rng};
+use rand::{thread_rng, Rng, RngCore};
 
 const N: usize = 2;
 
@@ -28,29 +28,37 @@ fn multi_key_param() -> BootstrappingParam {
     BootstrappingParam::new(rgsw, lwe, w)
 }
 
-fn foo<T: Clone + NumOps>(a: T, b: T) -> T {
-    (a.clone() + b.clone()) * a / b
-}
-
-fn main() {
-    let mut rng = OsRng;
-    let param = multi_key_param();
-    let crs = Bootstrapping::crs_gen(&param, &mut rng);
-    let sk_shares: [_; N] = from_fn(|_| Lwe::sk_gen(param.lwe_z(), &mut rng));
+fn multi_key_gen<T: Borrow<BootstrappingParam>>(
+    param: BootstrappingParam,
+    rng: &mut impl RngCore,
+) -> (RlwePublicKey, BootstrappingKey, impl Fn(FhewU8<T>) -> u8) {
+    let crs = Bootstrapping::crs_gen(&param, rng);
+    let sk_shares: [_; N] = from_fn(|_| Lwe::sk_gen(param.lwe_z(), rng));
     let pk = {
-        let pk_share_gen = |sk| Rlwe::pk_share_gen(param.rgsw(), crs.pk(), &sk, &mut rng);
+        let pk_share_gen = |sk| Rlwe::pk_share_gen(param.rgsw(), crs.pk(), &sk, rng);
         let pk_shares = sk_shares.each_ref().map(|sk| sk.into()).map(pk_share_gen);
         Rlwe::pk_share_merge(param.rgsw(), crs.pk().clone(), pk_shares)
     };
     let bk = {
-        let bk_share_gen = |sk| Bootstrapping::key_share_gen(&param, &crs, sk, &pk, &mut rng);
+        let bk_share_gen = |sk| Bootstrapping::key_share_gen(&param, &crs, sk, &pk, rng);
         let bk_shares = sk_shares.each_ref().map(bk_share_gen);
         Bootstrapping::key_share_merge(&param, crs, bk_shares)
     };
-    let decrypt = |ct: FhewU8<_>| {
-        let d_shares = sk_shares.iter().map(|sk| ct.share_decrypt(sk, &mut OsRng));
+    let decrypt = move |ct: FhewU8<_>| {
+        let share_decrypt = |sk| ct.share_decrypt(sk, &mut thread_rng());
+        let d_shares = sk_shares.each_ref().map(share_decrypt);
         ct.decryption_share_merge(d_shares)
     };
+    (pk, bk, decrypt)
+}
+
+fn foo<T: Clone + NumOps>(a: T, b: T) -> T {
+    ((a.clone() + b.clone()) * (a.clone() - b.clone()) / a) % b
+}
+
+fn main() {
+    let mut rng = thread_rng();
+    let (pk, bk, decrypt) = multi_key_gen(multi_key_param(), &mut rng);
 
     let [m0, m1] = from_fn(|_| Wrapping(rng.gen_range(1..=u8::MAX)));
     let [ct0, ct1] = [m0, m1].map(|m| FhewU8::pk_encrypt(&bk, &pk, m.0, &mut rng));

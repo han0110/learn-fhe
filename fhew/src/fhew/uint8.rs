@@ -25,7 +25,7 @@ impl<T: Borrow<BootstrappingParam> + Copy> FhewU8<T> {
     }
 
     pub fn decrypt(self, sk: &LweSecretKey) -> u8 {
-        let le_bits = self.0.into_iter().map(|bit| bit.decrypt(sk));
+        let le_bits = self.0.map(|bit| bit.decrypt(sk));
         u8_from_le_bits(le_bits)
     }
 }
