@@ -1,5 +1,5 @@
 [workspace]
-members = ["ckks", "fhew", "tfhe"]
+members = ["scheme/ckks", "scheme/fhew", "scheme/tfhe", "util"]
 resolver = "2"
 
 [workspace.dependencies]

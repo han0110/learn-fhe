@@ -7,13 +7,13 @@ use crate::{
         Rlwe, RlweAutoKey, RlweAutoKeyShare, RlweCiphertext, RlweParam, RlwePlaintext,
         RlwePublicKey, RlweSecretKey,
     },
-    util::{zipstar, AVec, Rq, Zq, X},
 };
 use core::{borrow::Borrow, iter::repeat_with};
 use derive_more::Deref;
 use itertools::{chain, izip, Itertools};
 use rand::RngCore;
 use std::collections::HashMap;
+use util::{zipstar, AVec, Rq, Zq, X};
 
 #[derive(Debug)]
 pub struct Bootstrapping;

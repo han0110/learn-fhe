@@ -1,4 +1,4 @@
-use crate::util::zq::Zq;
+use crate::zq::Zq;
 use core::{
     borrow::Borrow,
     fmt::{self, Display, Formatter},
@@ -151,7 +151,7 @@ macro_rules! impl_element_wise_op_assign {
                 for<$life> $t: $constraint,
             {
                 fn [<$trait:snake:lower>](&mut self, rhs: $rhs) {
-                    $crate::util::izip_eq!(self, rhs).for_each(|(lhs, rhs)| lhs.[<$trait:snake:lower>](rhs));
+                    $crate::izip_eq!(self, rhs).for_each(|(lhs, rhs)| lhs.[<$trait:snake:lower>](rhs));
                 }
             }
         }
@@ -195,7 +195,7 @@ macro_rules! impl_element_wise_op {
                 type Output = $out;
 
                 fn [<$trait:lower>](self, rhs: $rhs) -> Self::Output {
-                    $crate::util::izip_eq!(self, rhs).map(|(lhs, rhs)| lhs.[<$trait:lower>](rhs)).collect()
+                    $crate::izip_eq!(self, rhs).map(|(lhs, rhs)| lhs.[<$trait:lower>](rhs)).collect()
                 }
             }
         }

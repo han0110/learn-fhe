@@ -3,12 +3,12 @@ use crate::{
     fhew::boolean::{FhewBool, FhewBoolDecryptionShare},
     lwe::LweSecretKey,
     rlwe::RlwePublicKey,
-    zipstar,
 };
 use core::{array::from_fn, borrow::Borrow, ops::Not};
 use itertools::{izip, Itertools};
 use rand::RngCore;
 use std::{borrow::Cow, collections::VecDeque};
+use util::zipstar;
 
 #[derive(Clone, Debug)]
 pub struct FhewU8<T>([FhewBool<T>; 8]);

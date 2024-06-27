@@ -5,10 +5,10 @@ use fhew::{
     lwe::LweParam,
     rgsw::RgswParam,
     rlwe::{Rlwe, RlweParam, RlwePublicKey, RlweSecretKey},
-    util::two_adic_primes,
 };
 use num_traits::NumOps;
 use rand::{thread_rng, Rng, RngCore};
+use util::two_adic_primes;
 
 const N: usize = 2;
 

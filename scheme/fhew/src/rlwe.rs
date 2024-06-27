@@ -1,10 +1,8 @@
-use crate::{
-    lwe::{LweCiphertext, LweParam, LweSecretKey},
-    util::{dg, izip_eq, zipstar, zo, AVec, Dot, Rq, Zq},
-};
+use crate::lwe::{LweCiphertext, LweParam, LweSecretKey};
 use derive_more::{Add, AddAssign, Deref, Sub, SubAssign};
 use itertools::chain;
 use rand::RngCore;
+use util::{dg, izip_eq, zipstar, zo, AVec, Dot, Rq, Zq};
 
 #[derive(Debug)]
 pub struct Rlwe;
@@ -341,11 +339,11 @@ pub(crate) mod test {
     use crate::{
         lwe::Lwe,
         rlwe::{Rlwe, RlweParam},
-        util::{two_adic_primes, Rq},
     };
     use core::{array::from_fn, ops::Range};
     use itertools::izip;
     use rand::thread_rng;
+    use util::{two_adic_primes, Rq};
 
     pub(crate) fn testing_n_q(
         log_n_range: Range<usize>,

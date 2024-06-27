@@ -1,7 +1,7 @@
-use crate::util::{cartesian, dg, izip_eq, zipstar, AVec, Decomposor, Dot, Zq};
 use derive_more::{Add, AddAssign, Sub, SubAssign};
 use itertools::chain;
 use rand::RngCore;
+use util::{cartesian, dg, izip_eq, zipstar, AVec, Decomposor, Dot, Zq};
 
 #[derive(Debug)]
 pub struct Lwe;
@@ -237,12 +237,10 @@ impl Lwe {
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        lwe::{Lwe, LweParam},
-        util::Zq,
-    };
+    use crate::lwe::{Lwe, LweParam};
     use itertools::Itertools;
     use rand::thread_rng;
+    use util::Zq;
 
     #[test]
     fn encrypt_decrypt() {

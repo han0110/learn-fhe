@@ -1,4 +1,4 @@
-use crate::util::{
+use crate::{
     avec::{
         impl_element_wise_neg, impl_element_wise_op, impl_element_wise_op_assign,
         impl_mul_assign_element, impl_mul_element, AVec,
@@ -415,7 +415,7 @@ fn twiddle_free_bufferfly(a: &mut Zq, b: &mut Zq) {
 
 #[cfg(test)]
 mod test {
-    use crate::util::{
+    use crate::{
         poly::{nega_cyclic_schoolbook_mul, NegaCyclicPoly},
         zq::two_adic_primes,
     };

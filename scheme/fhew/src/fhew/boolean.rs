@@ -3,10 +3,10 @@ use crate::{
     fhew::Fhew,
     lwe::{Lwe, LweCiphertext, LweDecryptionShare, LweSecretKey},
     rlwe::{Rlwe, RlwePublicKey},
-    util::{Rq, Zq},
 };
 use core::{borrow::Borrow, ops::Not};
 use rand::RngCore;
+use util::{Rq, Zq};
 
 #[derive(Clone, Debug)]
 pub struct FhewBool<T> {
@@ -207,10 +207,10 @@ pub(crate) mod test {
         lwe::LweParam,
         rgsw::RgswParam,
         rlwe::{Rlwe, RlweParam, RlweSecretKey},
-        util::two_adic_primes,
     };
     use core::array::from_fn;
     use rand::thread_rng;
+    use util::two_adic_primes;
 
     #[rustfmt::skip]
     mod tt {

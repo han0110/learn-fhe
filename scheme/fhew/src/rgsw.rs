@@ -1,11 +1,9 @@
-use crate::{
-    rlwe::{Rlwe, RlweCiphertext, RlweParam, RlwePlaintext, RlwePublicKey, RlweSecretKey},
-    util::{AVec, Decomposable, Decomposor, Dot, Rq, Zq},
-};
+use crate::rlwe::{Rlwe, RlweCiphertext, RlweParam, RlwePlaintext, RlwePublicKey, RlweSecretKey};
 use core::{borrow::Borrow, iter::repeat_with};
 use derive_more::{Add, AddAssign, Deref, Sub, SubAssign};
 use itertools::{chain, izip, Either};
 use rand::RngCore;
+use util::{AVec, Decomposable, Decomposor, Dot, Rq, Zq};
 
 #[derive(Debug)]
 pub struct Rgsw;
@@ -150,10 +148,10 @@ mod test {
     use crate::{
         rgsw::{Rgsw, RgswParam},
         rlwe::{test::testing_n_q, Rlwe, RlweParam},
-        util::Rq,
     };
     use core::array::from_fn;
     use rand::thread_rng;
+    use util::Rq;
 
     #[test]
     fn encrypt_decrypt() {
