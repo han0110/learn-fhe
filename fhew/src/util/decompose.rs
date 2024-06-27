@@ -1,4 +1,4 @@
-use crate::util::Fq;
+use crate::util::Zq;
 use core::iter::repeat_with;
 use itertools::Itertools;
 
@@ -30,8 +30,8 @@ impl Decomposor {
         (self.rounding_bits..).step_by(self.log_b).take(self.d)
     }
 
-    pub fn bases(&self) -> impl Iterator<Item = Fq> + Clone + '_ {
-        self.log_bases().map(|bits| Fq::from_u64(self.q, 1 << bits))
+    pub fn bases(&self) -> impl Iterator<Item = Zq> + Clone + '_ {
+        self.log_bases().map(|bits| Zq::from_u64(self.q, 1 << bits))
     }
 
     pub fn decompose<T: Decomposable>(&self, value: &T) -> impl Iterator<Item = T> {
@@ -48,10 +48,10 @@ pub trait Decomposable: Sized {
     fn decompose(self, log_b: usize) -> impl Iterator<Item = Self>;
 }
 
-impl Decomposable for Fq {
+impl Decomposable for Zq {
     fn rounding_shr(&self, bits: usize) -> Self {
         let rounded = self + ((1u64 << bits) >> 1);
-        Fq::from_u64(self.q(), u64::from(rounded) >> bits)
+        Zq::from_u64(self.q(), u64::from(rounded) >> bits)
     }
 
     fn decompose(self, log_b: usize) -> impl Iterator<Item = Self> {

@@ -1,12 +1,13 @@
 //! Implementation of [\[LMKCDEY\]](https://eprint.iacr.org/2022/198.pdf).
 
 use crate::{
-    lwe::{
-        Lwe, LweCiphertext, LweKeySwitchingKey, LweKeySwitchingKeyShare, LweParam, LweSecretKey,
-    },
+    lwe::{Lwe, LweCiphertext, LweKeySwitchingKey, LweKeySwitchingKeyShare, LweParam},
     rgsw::{Rgsw, RgswCiphertext, RgswParam, RgswPlaintext},
-    rlwe::{Rlwe, RlweAutoKey, RlweAutoKeyShare, RlweCiphertext, RlwePlaintext, RlwePublicKey},
-    util::{zipstar, AVec, Fq, Poly, X},
+    rlwe::{
+        Rlwe, RlweAutoKey, RlweAutoKeyShare, RlweCiphertext, RlweParam, RlwePlaintext,
+        RlwePublicKey, RlweSecretKey,
+    },
+    util::{zipstar, AVec, Rq, Zq, X},
 };
 use core::{borrow::Borrow, iter::repeat_with};
 use derive_more::Deref;
@@ -20,7 +21,6 @@ pub struct Bootstrapping;
 #[derive(Clone, Copy, Debug)]
 pub struct BootstrappingParam {
     rgsw: RgswParam,
-    lwe_z: LweParam,
     lwe_s: LweParam,
     w: usize,
 }
@@ -28,16 +28,18 @@ pub struct BootstrappingParam {
 impl BootstrappingParam {
     pub fn new(rgsw: RgswParam, lwe_s: LweParam, w: usize) -> Self {
         assert_eq!(rgsw.p(), lwe_s.p());
-        let lwe_z = LweParam::new(rgsw.q(), rgsw.p(), rgsw.n());
-        Self {
-            rgsw,
-            lwe_z,
-            lwe_s,
-            w,
-        }
+        Self { rgsw, lwe_s, w }
     }
 
     pub fn rgsw(&self) -> &RgswParam {
+        &self.rgsw
+    }
+
+    pub fn rlwe(&self) -> &RlweParam {
+        &self.rgsw
+    }
+
+    pub fn lwe_z(&self) -> &LweParam {
         &self.rgsw
     }
 
@@ -45,12 +47,8 @@ impl BootstrappingParam {
         &self.lwe_s
     }
 
-    pub fn lwe_z(&self) -> &LweParam {
-        &self.lwe_z
-    }
-
     pub fn p(&self) -> u64 {
-        self.lwe_z.p()
+        self.rgsw().p()
     }
 
     pub fn n(&self) -> usize {
@@ -61,12 +59,12 @@ impl BootstrappingParam {
         self.rgsw().q()
     }
 
-    pub fn big_q_by_8(&self) -> Fq {
-        Fq::from_f64(self.big_q(), self.big_q() as f64 / 8.0)
+    pub fn big_q_by_8(&self) -> Zq {
+        Zq::from_f64(self.big_q(), self.big_q() as f64 / 8.0)
     }
 
-    pub fn big_q_by_4(&self) -> Fq {
-        Fq::from_f64(self.big_q(), self.big_q() as f64 / 4.0)
+    pub fn big_q_by_4(&self) -> Zq {
+        Zq::from_f64(self.big_q(), self.big_q() as f64 / 4.0)
     }
 
     pub fn big_q_ks(&self) -> u64 {
@@ -86,7 +84,7 @@ impl BootstrappingParam {
     }
 
     pub fn ak_t(&self) -> impl Iterator<Item = i64> {
-        let g = Fq::from_i64(2 * self.n() as u64, Rlwe::AUTO_G);
+        let g = Zq::from_i64(2 * self.n() as u64, Rlwe::AUTO_G);
         chain![[-g], g.powers().skip(1).take(self.w())].map_into()
     }
 }
@@ -100,6 +98,20 @@ pub struct BootstrappingKey {
     ak: AVec<RlweAutoKey>,
 }
 
+impl BootstrappingKey {
+    fn ksk(&self) -> &LweKeySwitchingKey {
+        &self.ksk
+    }
+
+    fn brk(&self) -> &[RgswCiphertext] {
+        &self.brk
+    }
+
+    fn ak(&self) -> &AVec<RlweAutoKey> {
+        &self.ak
+    }
+}
+
 impl Borrow<BootstrappingParam> for &BootstrappingKey {
     fn borrow(&self) -> &BootstrappingParam {
         self
@@ -109,21 +121,21 @@ impl Borrow<BootstrappingParam> for &BootstrappingKey {
 impl Bootstrapping {
     pub fn key_gen(
         param: &BootstrappingParam,
-        z: &LweSecretKey,
+        z: &RlweSecretKey,
         rng: &mut impl RngCore,
     ) -> BootstrappingKey {
         let s = Lwe::sk_gen(param.lwe_s(), rng);
         let ksk = Lwe::ksk_gen(param.lwe_s(), &s, z, rng);
         let brk = {
-            let one = &Poly::one(param.n(), param.big_q());
+            let one = &Rq::one(param.n(), param.big_q());
             s.0.iter()
                 .map(|sj| one * (X ^ sj))
-                .map(|pt| Rgsw::sk_encrypt(param.rgsw(), &z.into(), RgswPlaintext(pt), rng))
+                .map(|pt| Rgsw::sk_encrypt(param.rgsw(), z, RgswPlaintext(pt), rng))
                 .collect()
         };
         let ak = param
             .ak_t()
-            .map(|t| Rlwe::ak_gen(param.rgsw(), t, &z.into(), rng))
+            .map(|t| Rlwe::ak_gen(param.rlwe(), t, z, rng))
             .collect();
         BootstrappingKey {
             param: *param,
@@ -134,12 +146,12 @@ impl Bootstrapping {
     }
 
     // Figure 2 in 2022/198.
-    pub fn bootstrap(bk: &BootstrappingKey, f: &Poly<Fq>, ct: LweCiphertext) -> LweCiphertext {
+    pub fn bootstrap(bk: &BootstrappingKey, f: &Rq, ct: LweCiphertext) -> LweCiphertext {
         let ct = ct.mod_switch(bk.big_q_ks());
-        let ct = Lwe::key_switch(bk.lwe_s(), &bk.ksk, ct);
+        let ct = Lwe::key_switch(bk.lwe_s(), bk.ksk(), ct);
         let ct = ct.mod_switch_odd(bk.q());
-        let ct = Bootstrapping::blind_rotate(&bk.param, &bk.brk, &bk.ak, f, ct);
-        Rlwe::sample_extract(bk.rgsw(), ct, 0)
+        let ct = Bootstrapping::blind_rotate(bk, bk.brk(), bk.ak(), f, ct);
+        Rlwe::sample_extract(bk.rlwe(), ct, 0)
     }
 
     // Algorithm 7 in 2022/198.
@@ -147,7 +159,7 @@ impl Bootstrapping {
         param: &BootstrappingParam,
         brk: &[RgswCiphertext],
         ak: &[RlweAutoKey],
-        f: &Poly<Fq>,
+        f: &Rq,
         LweCiphertext(a, b): LweCiphertext,
     ) -> RlweCiphertext {
         let g = Rlwe::AUTO_G;
@@ -161,7 +173,7 @@ impl Bootstrapping {
         param: &BootstrappingParam,
         brk: &[RgswCiphertext],
         ak: &[RlweAutoKey],
-        a: AVec<Fq>,
+        a: AVec<Zq>,
         mut acc: RlweCiphertext,
     ) -> RlweCiphertext {
         let (i_minus, i_plus) = i_minus_i_plus(param.n(), &a);
@@ -171,22 +183,22 @@ impl Bootstrapping {
                 acc = Rgsw::external_product(param.rgsw(), &brk[*j], acc);
             }
             v += 1;
-            if !i_minus[l - 1].is_empty() || v == param.w || l == 1 {
-                acc = Rlwe::automorphism(param.rgsw(), &ak[v], acc);
+            if !i_minus[l - 1].is_empty() || v == param.w() || l == 1 {
+                acc = Rlwe::automorphism(param.rlwe(), &ak[v], acc);
                 v = 0
             }
         }
         for j in &i_minus[0] {
             acc = Rgsw::external_product(param.rgsw(), &brk[*j], acc);
         }
-        acc = Rlwe::automorphism(param.rgsw(), &ak[0], acc);
+        acc = Rlwe::automorphism(param.rlwe(), &ak[0], acc);
         for l in (1..i_plus.len()).rev() {
             for j in &i_plus[l] {
                 acc = Rgsw::external_product(param.rgsw(), &brk[*j], acc);
             }
             v += 1;
-            if !i_plus[l - 1].is_empty() || v == param.w || l == 1 {
-                acc = Rlwe::automorphism(param.rgsw(), &ak[v], acc);
+            if !i_plus[l - 1].is_empty() || v == param.w() || l == 1 {
+                acc = Rlwe::automorphism(param.rlwe(), &ak[v], acc);
                 v = 0
             }
         }
@@ -197,7 +209,7 @@ impl Bootstrapping {
     }
 }
 
-fn i_minus_i_plus(n: usize, a: &AVec<Fq>) -> (Vec<Vec<usize>>, Vec<Vec<usize>>) {
+fn i_minus_i_plus(n: usize, a: &AVec<Zq>) -> (Vec<Vec<usize>>, Vec<Vec<usize>>) {
     let (log_map_g_minus, log_map_g_plus) = (log_g_map(n, -1), log_g_map(n, 1));
     izip!(0.., a).fold(
         (vec![vec![]; n / 2], vec![vec![]; n / 2]),
@@ -213,19 +225,19 @@ fn i_minus_i_plus(n: usize, a: &AVec<Fq>) -> (Vec<Vec<usize>>, Vec<Vec<usize>>) 
     )
 }
 
-fn log_g_map(n: usize, sign: i64) -> HashMap<Fq, usize> {
-    let g = Fq::from_i64(2 * n as u64, Rlwe::AUTO_G);
+fn log_g_map(n: usize, sign: i64) -> HashMap<Zq, usize> {
+    let g = Zq::from_i64(2 * n as u64, Rlwe::AUTO_G);
     izip!(g.powers().map(|g| g * sign), 0..n / 2).collect()
 }
 
 pub struct BootstrappingCommonRefStr {
-    pk: Poly<Fq>,
-    ksk: Vec<AVec<Fq>>,
-    ak: Vec<Vec<Poly<Fq>>>,
+    pk: Rq,
+    ksk: Vec<AVec<Zq>>,
+    ak: Vec<Vec<Rq>>,
 }
 
 impl BootstrappingCommonRefStr {
-    pub fn pk(&self) -> &Poly<Fq> {
+    pub fn pk(&self) -> &Rq {
         &self.pk
     }
 }
@@ -241,13 +253,13 @@ impl Bootstrapping {
         param: &BootstrappingParam,
         rng: &mut impl RngCore,
     ) -> BootstrappingCommonRefStr {
-        let pk = Poly::sample_fq_uniform(param.n(), param.big_q(), rng);
-        let ksk = repeat_with(|| AVec::sample_fq_uniform(param.lwe_s().n(), param.big_q_ks(), rng))
+        let pk = Rq::sample_zq_uniform(param.n(), param.big_q(), rng);
+        let ksk = repeat_with(|| AVec::sample_zq_uniform(param.lwe_s().n(), param.big_q_ks(), rng))
             .take(param.n() * param.lwe_s().decomposor().d())
             .collect();
         let ak = repeat_with(|| {
-            repeat_with(|| Poly::sample_fq_uniform(param.n(), param.big_q(), rng))
-                .take(param.rgsw().decomposor().d())
+            repeat_with(|| Rq::sample_zq_uniform(param.n(), param.big_q(), rng))
+                .take(param.rlwe().decomposor().d())
                 .collect()
         })
         .take(param.ak_t().count())
@@ -258,14 +270,14 @@ impl Bootstrapping {
     pub fn key_share_gen(
         param: &BootstrappingParam,
         crs: &BootstrappingCommonRefStr,
-        z: &LweSecretKey,
+        z: &RlweSecretKey,
         pk: &RlwePublicKey,
         rng: &mut impl RngCore,
     ) -> BootstrappingKeyShare {
         let s = Lwe::sk_gen(param.lwe_s(), rng);
         let ksk = Lwe::ksk_share_gen(param.lwe_s(), &crs.ksk, &s, z, rng);
         let brk = {
-            let one = &Poly::one(param.n(), param.big_q());
+            let one = &Rq::one(param.n(), param.big_q());
             s.0.iter()
                 .map(|sj| one * (X ^ sj))
                 .map(|pt| Rgsw::pk_encrypt(param.rgsw(), pk, RgswPlaintext(pt), rng))
@@ -273,7 +285,7 @@ impl Bootstrapping {
         };
         let ak = {
             izip!(param.ak_t(), &crs.ak)
-                .map(|(t, crs)| Rlwe::ak_share_gen(param.rgsw(), t, crs, &z.into(), rng))
+                .map(|(t, crs)| Rlwe::ak_share_gen(param.rlwe(), t, crs, z, rng))
                 .collect()
         };
         BootstrappingKeyShare { ksk, brk, ak }
@@ -297,7 +309,7 @@ impl Bootstrapping {
             .collect();
         let ak = {
             izip!(param.ak_t(), crs.ak, zipstar!(ak_shares))
-                .map(|(t, crs, ak_share)| Rlwe::ak_share_merge(param.rgsw(), t, crs, ak_share))
+                .map(|(t, crs, ak_share)| Rlwe::ak_share_merge(param.rlwe(), t, crs, ak_share))
                 .collect()
         };
         BootstrappingKey {

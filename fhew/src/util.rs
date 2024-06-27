@@ -3,13 +3,13 @@ use rand_distr::{Distribution, Standard, WeightedIndex};
 
 mod avec;
 mod decompose;
-mod fq;
 mod poly;
+mod zq;
 
 pub use avec::AVec;
 pub use decompose::{Decomposable, Decomposor};
-pub use fq::{two_adic_primes, Fq};
-pub use poly::{Poly, X};
+pub use poly::{NegaCyclicPoly, Rq, X};
+pub use zq::{two_adic_primes, Zq};
 
 pub trait Dot<Rhs> {
     type Output;

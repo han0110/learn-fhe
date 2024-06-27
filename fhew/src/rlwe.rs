@@ -1,6 +1,6 @@
 use crate::{
     lwe::{LweCiphertext, LweParam, LweSecretKey},
-    util::{dg, izip_eq, zipstar, zo, AVec, Dot, Fq, Poly},
+    util::{dg, izip_eq, zipstar, zo, AVec, Dot, Rq, Zq},
 };
 use derive_more::{Add, AddAssign, Deref, Sub, SubAssign};
 use itertools::chain;
@@ -26,24 +26,28 @@ impl RlweParam {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct RlweSecretKey(pub(crate) Poly<i8>);
+#[derive(Clone, Debug, Deref)]
+pub struct RlweSecretKey(LweSecretKey);
 
-impl From<&LweSecretKey> for RlweSecretKey {
-    fn from(value: &LweSecretKey) -> Self {
-        RlweSecretKey(value.0.clone().into())
+impl RlweSecretKey {
+    fn as_avec(&self) -> &AVec<i8> {
+        &self.0 .0
+    }
+
+    fn automorphism(&self, t: i64) -> Self {
+        RlweSecretKey(LweSecretKey(self.as_avec().automorphism(t)))
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct RlwePublicKey(Poly<Fq>, Poly<Fq>);
+pub struct RlwePublicKey(Rq, Rq);
 
 impl RlwePublicKey {
-    pub fn a(&self) -> &Poly<Fq> {
+    pub fn a(&self) -> &Rq {
         &self.0
     }
 
-    pub fn b(&self) -> &Poly<Fq> {
+    pub fn b(&self) -> &Rq {
         &self.1
     }
 }
@@ -52,11 +56,11 @@ impl RlwePublicKey {
 pub struct RlweKeySwitchingKey(AVec<RlweCiphertext>);
 
 impl RlweKeySwitchingKey {
-    pub fn a(&self) -> impl Iterator<Item = &Poly<Fq>> {
+    pub fn a(&self) -> impl Iterator<Item = &Rq> {
         self.0.iter().map(|ct| ct.a())
     }
 
-    pub fn b(&self) -> impl Iterator<Item = &Poly<Fq>> {
+    pub fn b(&self) -> impl Iterator<Item = &Rq> {
         self.0.iter().map(|ct| ct.b())
     }
 }
@@ -71,17 +75,17 @@ impl RlweAutoKey {
 }
 
 #[derive(Clone, Debug)]
-pub struct RlwePlaintext(pub(crate) Poly<Fq>);
+pub struct RlwePlaintext(pub(crate) Rq);
 
 #[derive(Clone, Debug, Add, Sub, AddAssign, SubAssign)]
-pub struct RlweCiphertext(pub(crate) Poly<Fq>, pub(crate) Poly<Fq>);
+pub struct RlweCiphertext(pub(crate) Rq, pub(crate) Rq);
 
 impl RlweCiphertext {
-    pub fn a(&self) -> &Poly<Fq> {
+    pub fn a(&self) -> &Rq {
         &self.0
     }
 
-    pub fn b(&self) -> &Poly<Fq> {
+    pub fn b(&self) -> &Rq {
         &self.1
     }
 
@@ -92,7 +96,7 @@ impl RlweCiphertext {
 
 impl From<RlwePlaintext> for RlweCiphertext {
     fn from(RlwePlaintext(b): RlwePlaintext) -> Self {
-        Self(Poly::zero(b.n(), b[0].q()), b)
+        Self(Rq::zero(b.n(), b[0].q()), b)
     }
 }
 
@@ -100,11 +104,11 @@ impl Rlwe {
     pub const AUTO_G: i64 = 5;
 
     pub fn sk_gen(param: &RlweParam, rng: &mut impl RngCore) -> RlweSecretKey {
-        RlweSecretKey(Poly::sample(param.n(), &dg(3.2, 6), rng))
+        RlweSecretKey(LweSecretKey(AVec::sample(param.n(), &dg(3.2, 6), rng)))
     }
 
     pub fn pk_gen(param: &RlweParam, sk: &RlweSecretKey, rng: &mut impl RngCore) -> RlwePublicKey {
-        let zero = RlwePlaintext(Poly::zero(param.n(), param.q()));
+        let zero = RlwePlaintext(Rq::zero(param.n(), param.q()));
         let RlweCiphertext(a, b) = Rlwe::sk_encrypt(param, sk, zero, rng);
         RlwePublicKey(a, b)
     }
@@ -121,9 +125,9 @@ impl Rlwe {
         sk1: &RlweSecretKey,
         rng: &mut impl RngCore,
     ) -> RlweKeySwitchingKey {
-        let pt = param.decomposor().bases().map(|bi| -&sk1.0 * bi);
+        let pt = param.decomposor().bases().map(|bi| -sk1.as_avec() * bi);
         let ksk = pt
-            .map(|pt| Rlwe::sk_encrypt(param, sk0, RlwePlaintext(pt), rng))
+            .map(|pt| Rlwe::sk_encrypt(param, sk0, RlwePlaintext(pt.into()), rng))
             .collect();
         RlweKeySwitchingKey(ksk)
     }
@@ -134,20 +138,20 @@ impl Rlwe {
         sk: &RlweSecretKey,
         rng: &mut impl RngCore,
     ) -> RlweAutoKey {
-        let sk_auto = sk.0.automorphism(t);
-        let ksk = Rlwe::ksk_gen(param, sk, &RlweSecretKey(sk_auto), rng);
+        let sk_auto = sk.automorphism(t);
+        let ksk = Rlwe::ksk_gen(param, sk, &sk_auto, rng);
         RlweAutoKey(t, ksk)
     }
 
-    pub fn encode(param: &RlweParam, m: Poly<Fq>) -> RlwePlaintext {
+    pub fn encode(param: &RlweParam, m: Rq) -> RlwePlaintext {
         assert_eq!(m.n(), param.n());
         assert!(m.iter().all(|m| m.q() == param.p()));
-        let scale_up = |m| Fq::from_f64(param.q(), f64::from(m) * param.delta());
+        let scale_up = |m| Zq::from_f64(param.q(), f64::from(m) * param.delta());
         RlwePlaintext(m.iter().map(scale_up).collect())
     }
 
-    pub fn decode(param: &RlweParam, pt: RlwePlaintext) -> Poly<Fq> {
-        let scale_down = |m| Fq::from_f64(param.p(), f64::from(m) / param.delta());
+    pub fn decode(param: &RlweParam, pt: RlwePlaintext) -> Rq {
+        let scale_down = |m| Zq::from_f64(param.p(), f64::from(m) / param.delta());
         pt.0.iter().map(scale_down).collect()
     }
 
@@ -157,9 +161,9 @@ impl Rlwe {
         pt: RlwePlaintext,
         rng: &mut impl RngCore,
     ) -> RlweCiphertext {
-        let a = Poly::sample_fq_uniform(param.n(), param.q(), rng);
-        let e = Poly::sample_fq_from_i8(param.n(), param.q(), &dg(3.2, 6), rng);
-        let b = &a * &sk.0 + e + pt.0;
+        let a = Rq::sample_zq_uniform(param.n(), param.q(), rng);
+        let e = Rq::sample_zq_from_i8(param.n(), param.q(), &dg(3.2, 6), rng);
+        let b = &a * sk.as_avec() + e + pt.0;
         RlweCiphertext(a, b)
     }
 
@@ -169,16 +173,16 @@ impl Rlwe {
         pt: RlwePlaintext,
         rng: &mut impl RngCore,
     ) -> RlweCiphertext {
-        let u = &Poly::sample_fq_from_i8(param.n(), param.q(), &zo(0.5), rng);
-        let e0 = Poly::sample_fq_from_i8(param.n(), param.q(), &dg(3.2, 6), rng);
-        let e1 = Poly::sample_fq_from_i8(param.n(), param.q(), &dg(3.2, 6), rng);
+        let u = &Rq::sample_zq_from_i8(param.n(), param.q(), &zo(0.5), rng);
+        let e0 = Rq::sample_zq_from_i8(param.n(), param.q(), &dg(3.2, 6), rng);
+        let e1 = Rq::sample_zq_from_i8(param.n(), param.q(), &dg(3.2, 6), rng);
         let a = pk.a() * u + e0;
         let b = pk.b() * u + e1 + pt.0;
         RlweCiphertext(a, b)
     }
 
     pub fn decrypt(_: &RlweParam, sk: &RlweSecretKey, ct: RlweCiphertext) -> RlwePlaintext {
-        let pt = ct.b() - ct.a() * &sk.0;
+        let pt = ct.b() - ct.a() * sk.as_avec();
         RlwePlaintext(pt)
     }
 
@@ -211,13 +215,13 @@ impl Rlwe {
 }
 
 #[derive(Clone, Debug)]
-pub struct RlwePublicKeyShare(Poly<Fq>);
+pub struct RlwePublicKeyShare(Rq);
 
 #[derive(Clone, Debug)]
-pub struct RlweEncryptionShare(Poly<Fq>);
+pub struct RlweEncryptionShare(Rq);
 
 #[derive(Clone, Debug)]
-pub struct RlweDecryptionShare(Poly<Fq>);
+pub struct RlweDecryptionShare(Rq);
 
 #[derive(Clone, Debug)]
 pub struct RlweKeySwitchingKeyShare(Vec<RlweEncryptionShare>);
@@ -227,18 +231,18 @@ pub type RlweAutoKeyShare = RlweKeySwitchingKeyShare;
 impl Rlwe {
     pub fn pk_share_gen(
         param: &RlweParam,
-        a: &Poly<Fq>,
+        a: &Rq,
         sk: &RlweSecretKey,
         rng: &mut impl RngCore,
     ) -> RlwePublicKeyShare {
-        let zero = RlwePlaintext(Poly::zero(param.n(), param.q()));
+        let zero = RlwePlaintext(Rq::zero(param.n(), param.q()));
         let RlweEncryptionShare(b) = Rlwe::share_encrypt(param, a, sk, zero, rng);
         RlwePublicKeyShare(b)
     }
 
     pub fn pk_share_merge(
         _: &RlweParam,
-        a: Poly<Fq>,
+        a: Rq,
         shares: impl IntoIterator<Item = RlwePublicKeyShare>,
     ) -> RlwePublicKey {
         let b = shares.into_iter().map(|share| share.0).sum();
@@ -247,19 +251,19 @@ impl Rlwe {
 
     pub fn share_encrypt(
         param: &RlweParam,
-        a: &Poly<Fq>,
+        a: &Rq,
         sk: &RlweSecretKey,
         pt: RlwePlaintext,
         rng: &mut impl RngCore,
     ) -> RlweEncryptionShare {
-        let e = Poly::sample_fq_from_i8(param.n(), param.q(), &dg(3.2, 6), rng);
-        let b = a * &sk.0 + e + pt.0;
+        let e = Rq::sample_zq_from_i8(param.n(), param.q(), &dg(3.2, 6), rng);
+        let b = a * sk.as_avec() + e + pt.0;
         RlweEncryptionShare(b)
     }
 
     pub fn encryption_share_merge(
         _: &RlweParam,
-        a: Poly<Fq>,
+        a: Rq,
         shares: impl IntoIterator<Item = RlweEncryptionShare>,
     ) -> RlweCiphertext {
         let b = shares.into_iter().map(|share| share.0).sum();
@@ -269,40 +273,40 @@ impl Rlwe {
     pub fn share_decrypt(
         param: &RlweParam,
         sk: &RlweSecretKey,
-        a: &Poly<Fq>,
+        a: &Rq,
         rng: &mut impl RngCore,
     ) -> RlweDecryptionShare {
-        let e = Poly::sample_fq_from_i8(param.n(), param.q(), &dg(3.2, 6), rng);
-        let share = a * &sk.0 + e;
+        let e = Rq::sample_zq_from_i8(param.n(), param.q(), &dg(3.2, 6), rng);
+        let share = a * sk.as_avec() + e;
         RlweDecryptionShare(share)
     }
 
     pub fn decryption_share_merge(
         _: &RlweParam,
-        b: &Poly<Fq>,
+        b: &Rq,
         shares: impl IntoIterator<Item = RlweDecryptionShare>,
     ) -> RlwePlaintext {
-        let pt = b - shares.into_iter().map(|share| share.0).sum::<Poly<_>>();
+        let pt = b - shares.into_iter().map(|share| share.0).sum::<Rq<_>>();
         RlwePlaintext(pt)
     }
 
     pub fn ksk_share_gen(
         param: &RlweParam,
-        crs: &[Poly<Fq>],
+        crs: &[Rq],
         sk0: &RlweSecretKey,
         sk1: &RlweSecretKey,
         rng: &mut impl RngCore,
     ) -> RlweKeySwitchingKeyShare {
-        let pt = param.decomposor().bases().map(|bi| -&sk1.0 * bi);
+        let pt = param.decomposor().bases().map(|bi| -sk1.as_avec() * bi);
         let ksk = izip_eq!(crs, pt)
-            .map(|(a, pt)| Rlwe::share_encrypt(param, a, sk0, RlwePlaintext(pt), rng))
+            .map(|(a, pt)| Rlwe::share_encrypt(param, a, sk0, RlwePlaintext(pt.into()), rng))
             .collect();
         RlweKeySwitchingKeyShare(ksk)
     }
 
     pub fn ksk_share_merge(
         param: &RlweParam,
-        crs: Vec<Poly<Fq>>,
+        crs: Vec<Rq>,
         shares: impl IntoIterator<Item = RlweKeySwitchingKeyShare>,
     ) -> RlweKeySwitchingKey {
         let ksk = izip_eq!(crs, zipstar!(shares, 0))
@@ -314,18 +318,18 @@ impl Rlwe {
     pub fn ak_share_gen(
         param: &RlweParam,
         t: i64,
-        crs: &[Poly<Fq>],
+        crs: &[Rq],
         sk: &RlweSecretKey,
         rng: &mut impl RngCore,
     ) -> RlweAutoKeyShare {
-        let sk_auto = sk.0.automorphism(t);
-        Rlwe::ksk_share_gen(param, crs, sk, &RlweSecretKey(sk_auto), rng)
+        let sk_auto = sk.automorphism(t);
+        Rlwe::ksk_share_gen(param, crs, sk, &sk_auto, rng)
     }
 
     pub fn ak_share_merge(
         param: &RlweParam,
         t: i64,
-        crs: Vec<Poly<Fq>>,
+        crs: Vec<Rq>,
         shares: impl IntoIterator<Item = RlweAutoKeyShare>,
     ) -> RlweAutoKey {
         RlweAutoKey(t, Rlwe::ksk_share_merge(param, crs, shares))
@@ -337,7 +341,7 @@ pub(crate) mod test {
     use crate::{
         lwe::Lwe,
         rlwe::{Rlwe, RlweParam},
-        util::{two_adic_primes, Poly},
+        util::{two_adic_primes, Rq},
     };
     use core::{array::from_fn, ops::Range};
     use itertools::izip;
@@ -357,7 +361,7 @@ pub(crate) mod test {
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RlweParam::new(q, p, log_n);
             let (sk, pk) = Rlwe::key_gen(&param, &mut rng);
-            let m = Poly::sample_fq_uniform(param.n(), p, &mut rng);
+            let m = Rq::sample_zq_uniform(param.n(), p, &mut rng);
             let pt0 = Rlwe::encode(&param, m.clone());
             let pt1 = Rlwe::encode(&param, m.clone());
             let ct0 = Rlwe::sk_encrypt(&param, &sk, pt0, &mut rng);
@@ -374,7 +378,7 @@ pub(crate) mod test {
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RlweParam::new(q, p, log_n);
             let (sk, pk) = Rlwe::key_gen(&param, &mut rng);
-            let [m0, m1] = &from_fn(|_| Poly::sample_fq_uniform(param.n(), p, &mut rng));
+            let [m0, m1] = &from_fn(|_| Rq::sample_zq_uniform(param.n(), p, &mut rng));
             let [pt0, pt1] = [m0, m1].map(|m| Rlwe::encode(&param, m.clone()));
             let [ct0, ct1] = [pt0, pt1].map(|pt| Rlwe::pk_encrypt(&param, &pk, pt, &mut rng));
             let (m2, ct2) = (m0 + m1, ct0.clone() + ct1.clone());
@@ -394,7 +398,7 @@ pub(crate) mod test {
             let (sk0, pk0) = Rlwe::key_gen(&param0, &mut rng);
             let (sk1, _) = Rlwe::key_gen(&param1, &mut rng);
             let ksk = Rlwe::ksk_gen(&param1, &sk1, &sk0, &mut rng);
-            let m = Poly::sample_fq_uniform(param0.n(), p, &mut rng);
+            let m = Rq::sample_zq_uniform(param0.n(), p, &mut rng);
             let pt = Rlwe::encode(&param0, m.clone());
             let ct0 = Rlwe::pk_encrypt(&param0, &pk0, pt, &mut rng);
             let ct1 = Rlwe::key_switch(&param1, &ksk, ct0);
@@ -411,7 +415,7 @@ pub(crate) mod test {
                 let param = RlweParam::new(q, p, log_n).with_decomposor(log_b, d);
                 let (sk, pk) = Rlwe::key_gen(&param, &mut rng);
                 let ak = Rlwe::ak_gen(&param, t, &sk, &mut rng);
-                let m = Poly::sample_fq_uniform(param.n(), p, &mut rng);
+                let m = Rq::sample_zq_uniform(param.n(), p, &mut rng);
                 let pt = Rlwe::encode(&param, m.clone());
                 let ct0 = Rlwe::pk_encrypt(&param, &pk, pt, &mut rng);
                 let ct1 = Rlwe::automorphism(&param, &ak, ct0);
@@ -430,8 +434,7 @@ pub(crate) mod test {
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RlweParam::new(q, p, log_n);
             let (sk, pk) = Rlwe::key_gen(&param, &mut rng);
-            let sk = (&sk).into();
-            let m = Poly::sample_fq_uniform(param.n(), p, &mut rng);
+            let m = Rq::sample_zq_uniform(param.n(), p, &mut rng);
             let pt = Rlwe::encode(&param, m.clone());
             let ct = Rlwe::pk_encrypt(&param, &pk, pt, &mut rng);
             for i in 0..param.n() {
@@ -449,14 +452,14 @@ pub(crate) mod test {
         let (log_n_range, log_q, p) = (0..10, 45, 1 << 4);
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RlweParam::new(q, p, log_n);
-            let a = Poly::sample_fq_uniform(param.n(), param.q(), &mut rng);
+            let a = Rq::sample_zq_uniform(param.n(), param.q(), &mut rng);
             let sk_shares: [_; N] = from_fn(|_| Rlwe::sk_gen(&param, &mut rng));
             let pk = {
                 let pk_share_gen = |sk| Rlwe::pk_share_gen(&param, &a, sk, &mut rng);
                 let pk_shares = sk_shares.each_ref().map(pk_share_gen);
                 Rlwe::pk_share_merge(&param, a, pk_shares)
             };
-            let m = Poly::sample_fq_uniform(param.n(), p, &mut rng);
+            let m = Rq::sample_zq_uniform(param.n(), p, &mut rng);
             let ct = Rlwe::pk_encrypt(&param, &pk, Rlwe::encode(&param, m.clone()), &mut rng);
             let pt = {
                 let d_shares = sk_shares

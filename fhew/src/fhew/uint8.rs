@@ -258,7 +258,6 @@ mod test {
     use crate::{
         bootstrapping::Bootstrapping,
         fhew::{boolean::test::single_key_testing_param, uint8::FhewU8, FhewBool},
-        lwe::Lwe,
         rlwe::Rlwe,
     };
     use num_integer::Integer;
@@ -294,8 +293,8 @@ mod test {
     fn encrypt_decrypt() {
         let mut rng = thread_rng();
         let param = single_key_testing_param();
-        let sk = Lwe::sk_gen(param.lwe_z(), &mut rng);
-        let pk = Rlwe::pk_gen(param.rgsw(), &(&sk).into(), &mut rng);
+        let sk = Rlwe::sk_gen(param.rlwe(), &mut rng);
+        let pk = Rlwe::pk_gen(param.rlwe(), &sk, &mut rng);
         for m in 0..u8::MAX {
             let ct0 = FhewU8::sk_encrypt(&param, &sk, m, &mut rng);
             let ct1 = FhewU8::pk_encrypt(&param, &pk, m, &mut rng);
@@ -308,7 +307,7 @@ mod test {
     fn op() {
         let mut rng = thread_rng();
         let param = single_key_testing_param();
-        let sk = Lwe::sk_gen(param.lwe_z(), &mut rng);
+        let sk = Rlwe::sk_gen(param.rlwe(), &mut rng);
         let bk = Bootstrapping::key_gen(&param, &sk, &mut rng);
         let encrypt_bool = |m| FhewBool::sk_encrypt(&bk, &sk, m, &mut thread_rng());
         let encrypt_u8 = |m| FhewU8::sk_encrypt(&bk, &sk, m, &mut thread_rng());

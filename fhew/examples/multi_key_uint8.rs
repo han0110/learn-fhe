@@ -2,9 +2,9 @@ use core::{array::from_fn, borrow::Borrow, num::Wrapping};
 use fhew::{
     bootstrapping::{Bootstrapping, BootstrappingKey, BootstrappingParam},
     fhew::FhewU8,
-    lwe::{Lwe, LweParam},
+    lwe::LweParam,
     rgsw::RgswParam,
-    rlwe::{Rlwe, RlweParam, RlwePublicKey},
+    rlwe::{Rlwe, RlweParam, RlwePublicKey, RlweSecretKey},
     util::two_adic_primes,
 };
 use num_traits::NumOps;
@@ -33,11 +33,11 @@ fn multi_key_gen<T: Borrow<BootstrappingParam>>(
     rng: &mut impl RngCore,
 ) -> (RlwePublicKey, BootstrappingKey, impl Fn(FhewU8<T>) -> u8) {
     let crs = Bootstrapping::crs_gen(&param, rng);
-    let sk_shares: [_; N] = from_fn(|_| Lwe::sk_gen(param.lwe_z(), rng));
+    let sk_shares: [_; N] = from_fn(|_| Rlwe::sk_gen(param.rlwe(), rng));
     let pk = {
-        let pk_share_gen = |sk| Rlwe::pk_share_gen(param.rgsw(), crs.pk(), &sk, rng);
-        let pk_shares = sk_shares.each_ref().map(|sk| sk.into()).map(pk_share_gen);
-        Rlwe::pk_share_merge(param.rgsw(), crs.pk().clone(), pk_shares)
+        let pk_share_gen = |sk| Rlwe::pk_share_gen(param.rlwe(), crs.pk(), sk, rng);
+        let pk_shares = sk_shares.each_ref().map(pk_share_gen);
+        Rlwe::pk_share_merge(param.rlwe(), crs.pk().clone(), pk_shares)
     };
     let bk = {
         let bk_share_gen = |sk| Bootstrapping::key_share_gen(&param, &crs, sk, &pk, rng);
@@ -45,7 +45,7 @@ fn multi_key_gen<T: Borrow<BootstrappingParam>>(
         Bootstrapping::key_share_merge(&param, crs, bk_shares)
     };
     let decrypt = move |ct: FhewU8<_>| {
-        let share_decrypt = |sk| ct.share_decrypt(sk, &mut thread_rng());
+        let share_decrypt = |sk: &RlweSecretKey| ct.share_decrypt(sk, &mut thread_rng());
         let d_shares = sk_shares.each_ref().map(share_decrypt);
         ct.decryption_share_merge(d_shares)
     };

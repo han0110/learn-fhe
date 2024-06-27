@@ -3,15 +3,15 @@ use crate::util::{
         impl_element_wise_neg, impl_element_wise_op, impl_element_wise_op_assign,
         impl_mul_assign_element, impl_mul_element, AVec,
     },
-    fq::{Fq, NEG_NTT_PSI},
     izip_eq,
+    zq::{twiddle, Zq},
 };
 use core::{
     borrow::Borrow,
     fmt::{self, Debug, Display, Formatter},
     iter::Sum,
     marker::PhantomData,
-    ops::{AddAssign, BitXor, Mul, MulAssign, Neg},
+    ops::{AddAssign, BitXor, MulAssign, Neg},
     slice,
 };
 use derive_more::{Deref, DerefMut};
@@ -32,15 +32,17 @@ pub struct Evaluation;
 
 impl Basis for Evaluation {}
 
+pub type Rq<B = Coefficient> = NegaCyclicPoly<Zq, B>;
+
 #[derive(Clone, Debug, PartialEq, Eq, Deref, DerefMut)]
-pub struct Poly<T, B: Basis = Coefficient>(
+pub struct NegaCyclicPoly<T, B: Basis = Coefficient>(
     #[deref]
     #[deref_mut]
     AVec<T>,
     PhantomData<B>,
 );
 
-impl<T, B: Basis> Poly<T, B> {
+impl<T, B: Basis> NegaCyclicPoly<T, B> {
     fn new(v: AVec<T>) -> Self {
         assert!(v.len().is_power_of_two());
         Self(v, PhantomData)
@@ -55,26 +57,15 @@ impl<T, B: Basis> Poly<T, B> {
     }
 }
 
-impl<T: Copy + Neg<Output = T>> Poly<T, Coefficient> {
+impl<T: Copy + Neg<Output = T>> NegaCyclicPoly<T, Coefficient> {
     pub fn automorphism(&self, t: i64) -> Self {
-        let mut poly = self.clone();
-        let n = self.n();
-        let t = t.rem_euclid(2 * n as i64) as usize;
-        (0..n).for_each(|i| {
-            let it = (i * t) % (2 * n);
-            if it < n {
-                poly[it] = self[i]
-            } else {
-                poly[it - n] = -self[i]
-            }
-        });
-        poly
+        Self::new(self.0.automorphism(t))
     }
 }
 
-impl Poly<Fq, Coefficient> {
+impl NegaCyclicPoly<Zq, Coefficient> {
     pub fn zero(n: usize, q: u64) -> Self {
-        Self::new(vec![Fq::from_u64(q, 0); n].into())
+        Self::new(vec![Zq::from_u64(q, 0); n].into())
     }
 
     pub fn one(n: usize, q: u64) -> Self {
@@ -83,23 +74,23 @@ impl Poly<Fq, Coefficient> {
         poly
     }
 
-    pub fn constant(n: usize, v: Fq) -> Self {
+    pub fn constant(n: usize, v: Zq) -> Self {
         let mut poly = Self::zero(n, v.q());
         poly[0] = v;
         poly
     }
 
-    pub fn sample_fq_uniform(n: usize, q: u64, rng: &mut impl RngCore) -> Self {
-        Self::new(AVec::sample_fq_uniform(n, q, rng))
+    pub fn sample_zq_uniform(n: usize, q: u64, rng: &mut impl RngCore) -> Self {
+        Self::new(AVec::sample_zq_uniform(n, q, rng))
     }
 
-    pub fn sample_fq_from_i8(
+    pub fn sample_zq_from_i8(
         n: usize,
         q: u64,
         dist: &impl Distribution<i8>,
         rng: &mut impl RngCore,
     ) -> Self {
-        Self::new(AVec::sample_fq_from_i8(n, q, dist, rng))
+        Self::new(AVec::sample_zq_from_i8(n, q, dist, rng))
     }
 
     pub fn mod_switch(&self, q_prime: u64) -> Self {
@@ -110,66 +101,66 @@ impl Poly<Fq, Coefficient> {
         Self::new(self.0.mod_switch_odd(q_prime))
     }
 
-    pub fn to_evaluation(&self) -> Poly<Fq, Evaluation> {
-        let [psi, _] = &NEG_NTT_PSI.get().unwrap().lock().unwrap()[&self[0].q()];
+    pub fn to_evaluation(&self) -> NegaCyclicPoly<Zq, Evaluation> {
+        let [psi, _] = &*twiddle(self[0].q());
         let mut a = self.0.clone();
-        neg_ntt_in_place(&mut a, psi);
-        Poly::new(a)
+        nega_cyclic_ntt_in_place(&mut a, psi);
+        NegaCyclicPoly::new(a)
     }
 }
 
-impl Poly<Fq, Evaluation> {
-    pub fn to_coefficient(&self) -> Poly<Fq, Coefficient> {
-        let [_, psi_inv] = &NEG_NTT_PSI.get().unwrap().lock().unwrap()[&self[0].q()];
+impl NegaCyclicPoly<Zq, Evaluation> {
+    pub fn to_coefficient(&self) -> NegaCyclicPoly<Zq, Coefficient> {
+        let [_, psi_inv] = &*twiddle(self[0].q());
         let mut a = self.0.clone();
-        neg_intt_in_place(&mut a, psi_inv);
-        Poly::new(a)
+        nega_cyclic_intt_in_place(&mut a, psi_inv);
+        NegaCyclicPoly::new(a)
     }
 }
 
-impl<T: Display> Display for Poly<T> {
+impl<T: Display> Display for NegaCyclicPoly<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl<T> From<Poly<T>> for Vec<T> {
-    fn from(value: Poly<T>) -> Self {
+impl<T> From<NegaCyclicPoly<T>> for Vec<T> {
+    fn from(value: NegaCyclicPoly<T>) -> Self {
         value.0.into()
     }
 }
 
-impl<T> From<Vec<T>> for Poly<T> {
+impl<T> From<Vec<T>> for NegaCyclicPoly<T> {
     fn from(value: Vec<T>) -> Self {
         Self::new(value.into())
     }
 }
 
-impl<T: Clone> From<&[T]> for Poly<T> {
+impl<T: Clone> From<&[T]> for NegaCyclicPoly<T> {
     fn from(value: &[T]) -> Self {
         Self::new(value.into())
     }
 }
 
-impl<T> From<Poly<T>> for AVec<T> {
-    fn from(value: Poly<T>) -> Self {
+impl<T> From<NegaCyclicPoly<T>> for AVec<T> {
+    fn from(value: NegaCyclicPoly<T>) -> Self {
         value.0
     }
 }
 
-impl<T> From<AVec<T>> for Poly<T> {
+impl<T> From<AVec<T>> for NegaCyclicPoly<T> {
     fn from(value: AVec<T>) -> Self {
         Self::new(value)
     }
 }
 
-impl<T, B: Basis> FromIterator<T> for Poly<T, B> {
+impl<T, B: Basis> FromIterator<T> for NegaCyclicPoly<T, B> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect())
     }
 }
 
-impl<T, B: Basis> IntoIterator for Poly<T, B> {
+impl<T, B: Basis> IntoIterator for NegaCyclicPoly<T, B> {
     type Item = T;
     type IntoIter = vec::IntoIter<T>;
 
@@ -178,7 +169,7 @@ impl<T, B: Basis> IntoIterator for Poly<T, B> {
     }
 }
 
-impl<'a, T, B: Basis> IntoIterator for &'a Poly<T, B> {
+impl<'a, T, B: Basis> IntoIterator for &'a NegaCyclicPoly<T, B> {
     type Item = &'a T;
     type IntoIter = slice::Iter<'a, T>;
 
@@ -187,7 +178,7 @@ impl<'a, T, B: Basis> IntoIterator for &'a Poly<T, B> {
     }
 }
 
-impl<'a, T, B: Basis> IntoIterator for &'a mut Poly<T, B> {
+impl<'a, T, B: Basis> IntoIterator for &'a mut NegaCyclicPoly<T, B> {
     type Item = &'a mut T;
     type IntoIter = slice::IterMut<'a, T>;
 
@@ -196,44 +187,35 @@ impl<'a, T, B: Basis> IntoIterator for &'a mut Poly<T, B> {
     }
 }
 
-impl MulAssign<&Poly<Fq, Coefficient>> for Poly<Fq, Coefficient> {
-    fn mul_assign(&mut self, rhs: &Poly<Fq, Coefficient>) {
+impl MulAssign<&NegaCyclicPoly<Zq, Coefficient>> for NegaCyclicPoly<Zq, Coefficient> {
+    fn mul_assign(&mut self, rhs: &NegaCyclicPoly<Zq, Coefficient>) {
         assert_eq!(self.len(), rhs.len());
-        match NEG_NTT_PSI.get().unwrap().lock().unwrap().get(&self[0].q()) {
+        match twiddle(self[0].q()).get() {
             Some([psi, psi_inv]) if self.n() <= psi.len() => {
-                neg_ntt_mul_assign(self, rhs, psi, psi_inv)
+                nega_cyclic_ntt_mul_assign(self, rhs, psi, psi_inv)
             }
-            _ => *self = neg_schoolbook_mul(self, rhs),
+            _ => *self = nega_cyclic_schoolbook_mul(self, rhs),
         }
     }
 }
 
-impl MulAssign<&Poly<Fq, Evaluation>> for Poly<Fq, Evaluation> {
-    fn mul_assign(&mut self, rhs: &Poly<Fq, Evaluation>) {
+impl MulAssign<&NegaCyclicPoly<Zq, Evaluation>> for NegaCyclicPoly<Zq, Evaluation> {
+    fn mul_assign(&mut self, rhs: &NegaCyclicPoly<Zq, Evaluation>) {
         izip_eq!(self, rhs).for_each(|(lhs, rhs)| *lhs *= rhs);
     }
 }
 
-impl MulAssign<&Poly<i8>> for Poly<Fq> {
-    fn mul_assign(&mut self, rhs: &Poly<i8>) {
-        *self *= Self::from_iter(rhs.iter().map(|v| Fq::from_i8(self[0].q(), *v)));
+impl MulAssign<&AVec<i8>> for NegaCyclicPoly<Zq> {
+    fn mul_assign(&mut self, rhs: &AVec<i8>) {
+        *self *= Self::from_iter(rhs.iter().map(|v| Zq::from_i8(self[0].q(), *v)));
     }
 }
 
-impl Mul<&Fq> for &Poly<i8> {
-    type Output = Poly<Fq>;
-
-    fn mul(self, rhs: &Fq) -> Self::Output {
-        let q = rhs.q();
-        self.iter().map(|v| Fq::from_i8(q, *v) * rhs).collect()
-    }
-}
-
-impl<T, B, Item> Sum<Item> for Poly<T, B>
+impl<T, B, Item> Sum<Item> for NegaCyclicPoly<T, B>
 where
     T: Clone + for<'t> AddAssign<&'t T>,
     B: Basis,
-    Item: Borrow<Poly<T, B>>,
+    Item: Borrow<NegaCyclicPoly<T, B>>,
 {
     fn sum<I: Iterator<Item = Item>>(mut iter: I) -> Self {
         let init = iter.next().unwrap().borrow().0.clone();
@@ -245,31 +227,31 @@ where
 }
 
 impl_element_wise_neg!(
-    impl<T> Neg for Poly<T, Coefficient>,
-    impl<T> Neg for Poly<T, Evaluation>,
+    impl<T> Neg for NegaCyclicPoly<T, Coefficient>,
+    impl<T> Neg for NegaCyclicPoly<T, Evaluation>,
 );
 impl_element_wise_op_assign!(
-    impl<T> AddAssign<Poly<T, Coefficient>> for Poly<T, Coefficient>,
-    impl<T> AddAssign<Poly<T, Evaluation>> for Poly<T, Evaluation>,
-    impl<T> SubAssign<Poly<T, Coefficient>> for Poly<T, Coefficient>,
-    impl<T> SubAssign<Poly<T, Evaluation>> for Poly<T, Evaluation>,
+    impl<T> AddAssign<NegaCyclicPoly<T, Coefficient>> for NegaCyclicPoly<T, Coefficient>,
+    impl<T> AddAssign<NegaCyclicPoly<T, Evaluation>> for NegaCyclicPoly<T, Evaluation>,
+    impl<T> SubAssign<NegaCyclicPoly<T, Coefficient>> for NegaCyclicPoly<T, Coefficient>,
+    impl<T> SubAssign<NegaCyclicPoly<T, Evaluation>> for NegaCyclicPoly<T, Evaluation>,
 );
 impl_element_wise_op!(
-    impl<T> Add<Poly<T, Coefficient>> for Poly<T, Coefficient>,
-    impl<T> Add<Poly<T, Evaluation>> for Poly<T, Evaluation>,
-    impl<T> Sub<Poly<T, Coefficient>> for Poly<T, Coefficient>,
-    impl<T> Sub<Poly<T, Evaluation>> for Poly<T, Evaluation>,
+    impl<T> Add<NegaCyclicPoly<T, Coefficient>> for NegaCyclicPoly<T, Coefficient>,
+    impl<T> Add<NegaCyclicPoly<T, Evaluation>> for NegaCyclicPoly<T, Evaluation>,
+    impl<T> Sub<NegaCyclicPoly<T, Coefficient>> for NegaCyclicPoly<T, Coefficient>,
+    impl<T> Sub<NegaCyclicPoly<T, Evaluation>> for NegaCyclicPoly<T, Evaluation>,
 );
 impl_mul_assign_element!(
-    impl<T> MulAssign<T> for Poly<T, Coefficient>,
-    impl<T> MulAssign<T> for Poly<T, Evaluation>,
+    impl<T> MulAssign<T> for NegaCyclicPoly<T, Coefficient>,
+    impl<T> MulAssign<T> for NegaCyclicPoly<T, Evaluation>,
 );
 impl_mul_element!(
-    impl<T> Mul<T> for Poly<T, Coefficient>,
-    impl<T> Mul<T> for Poly<T, Evaluation>,
+    impl<T> Mul<T> for NegaCyclicPoly<T, Coefficient>,
+    impl<T> Mul<T> for NegaCyclicPoly<T, Evaluation>,
 );
 
-macro_rules! impl_poly_fq_mul {
+macro_rules! impl_poly_zq_mul {
     (@ impl Mul<$rhs:ty> for $lhs:ty; type Output = $out:ty; $lhs_convert:expr) => {
         impl core::ops::Mul<$rhs> for $lhs {
             type Output = $out;
@@ -288,46 +270,24 @@ macro_rules! impl_poly_fq_mul {
                     *self *= &rhs;
                 }
             }
-            impl_poly_fq_mul!(@ impl Mul<$rhs> for $lhs; type Output = $lhs; core::convert::identity);
-            impl_poly_fq_mul!(@ impl Mul<&$rhs> for $lhs; type Output = $lhs; core::convert::identity);
-            impl_poly_fq_mul!(@ impl Mul<$rhs> for &$lhs; type Output = $lhs; <_>::clone);
-            impl_poly_fq_mul!(@ impl Mul<&$rhs> for &$lhs; type Output = $lhs; <_>::clone);
+            impl_poly_zq_mul!(@ impl Mul<$rhs> for $lhs; type Output = $lhs; core::convert::identity);
+            impl_poly_zq_mul!(@ impl Mul<&$rhs> for $lhs; type Output = $lhs; core::convert::identity);
+            impl_poly_zq_mul!(@ impl Mul<$rhs> for &$lhs; type Output = $lhs; <_>::clone);
+            impl_poly_zq_mul!(@ impl Mul<&$rhs> for &$lhs; type Output = $lhs; <_>::clone);
         )*
     }
 }
 
-macro_rules! impl_poly_i8_mul {
-    (@ impl Mul<$rhs:ty> for $lhs:ty) => {
-        impl core::ops::Mul<$rhs> for $lhs {
-            type Output = Poly<Fq>;
-
-            fn mul(self, rhs: $rhs) -> Poly<Fq> {
-                self.borrow().mul(rhs.borrow())
-            }
-        }
-    };
-    ($(impl Mul<$rhs:ty> for Poly<i8>),* $(,)?) => {
-        $(
-            impl_poly_i8_mul!(@ impl Mul<$rhs> for Poly<i8>);
-            impl_poly_i8_mul!(@ impl Mul<&$rhs> for Poly<i8>);
-            impl_poly_i8_mul!(@ impl Mul<$rhs> for &Poly<i8>);
-        )*
-    }
-}
-
-impl_poly_fq_mul!(
-    impl Mul<Poly<Fq, Coefficient>> for Poly<Fq, Coefficient>,
-    impl Mul<Poly<Fq, Evaluation>> for Poly<Fq, Evaluation>,
-    impl Mul<Poly<i8>> for Poly<Fq>,
-    impl Mul<Monomial> for Poly<Fq>,
-);
-impl_poly_i8_mul!(
-    impl Mul<Fq> for Poly<i8>,
+impl_poly_zq_mul!(
+    impl Mul<NegaCyclicPoly<Zq, Coefficient>> for NegaCyclicPoly<Zq, Coefficient>,
+    impl Mul<NegaCyclicPoly<Zq, Evaluation>> for NegaCyclicPoly<Zq, Evaluation>,
+    impl Mul<AVec<i8>> for NegaCyclicPoly<Zq>,
+    impl Mul<Monomial> for NegaCyclicPoly<Zq>,
 );
 
 pub struct Monomial(i64);
 
-impl MulAssign<&Monomial> for Poly<Fq> {
+impl MulAssign<&Monomial> for NegaCyclicPoly<Zq> {
     fn mul_assign(&mut self, rhs: &Monomial) {
         let n = self.n();
         let i = rhs.0.rem_euclid(2 * n as i64) as usize;
@@ -350,17 +310,20 @@ impl BitXor<&i8> for X {
     }
 }
 
-impl BitXor<Fq> for X {
+impl BitXor<Zq> for X {
     type Output = Monomial;
 
-    fn bitxor(self, rhs: Fq) -> Self::Output {
+    fn bitxor(self, rhs: Zq) -> Self::Output {
         Monomial(rhs.into())
     }
 }
 
-fn neg_schoolbook_mul(a: &Poly<Fq>, b: &Poly<Fq>) -> Poly<Fq> {
+fn nega_cyclic_schoolbook_mul(
+    a: &NegaCyclicPoly<Zq>,
+    b: &NegaCyclicPoly<Zq>,
+) -> NegaCyclicPoly<Zq> {
     let n = a.len();
-    let mut c = Poly::from(vec![Fq::from_u64(a[0].q(), 0); n]);
+    let mut c = NegaCyclicPoly::from(vec![Zq::from_u64(a[0].q(), 0); n]);
     izip!(0.., a.iter()).for_each(|(i, a)| {
         izip!(0.., b.iter()).for_each(|(j, b)| {
             if i + j < n {
@@ -373,16 +336,21 @@ fn neg_schoolbook_mul(a: &Poly<Fq>, b: &Poly<Fq>) -> Poly<Fq> {
     c
 }
 
-fn neg_ntt_mul_assign(a: &mut Poly<Fq>, b: &Poly<Fq>, psi: &[Fq], psi_inv: &[Fq]) {
+fn nega_cyclic_ntt_mul_assign(
+    a: &mut NegaCyclicPoly<Zq>,
+    b: &NegaCyclicPoly<Zq>,
+    psi: &[Zq],
+    psi_inv: &[Zq],
+) {
     let b = &mut b.clone();
-    neg_ntt_in_place(a, psi);
-    neg_ntt_in_place(b, psi);
+    nega_cyclic_ntt_in_place(a, psi);
+    nega_cyclic_ntt_in_place(b, psi);
     izip!(a.iter_mut(), b.iter()).for_each(|(a, b)| *a *= b);
-    neg_intt_in_place(a, psi_inv);
+    nega_cyclic_intt_in_place(a, psi_inv);
 }
 
 // Algorithm 1 in 2016/504.
-fn neg_ntt_in_place(a: &mut [Fq], psi: &[Fq]) {
+fn nega_cyclic_ntt_in_place(a: &mut [Zq], psi: &[Zq]) {
     assert!(a.len().is_power_of_two());
 
     for log_m in 0..a.len().ilog2() {
@@ -400,7 +368,7 @@ fn neg_ntt_in_place(a: &mut [Fq], psi: &[Fq]) {
 }
 
 // Algorithm 2 in 2016/504.
-fn neg_intt_in_place(a: &mut [Fq], psi_inv: &[Fq]) {
+fn nega_cyclic_intt_in_place(a: &mut [Zq], psi_inv: &[Zq]) {
     assert!(a.len().is_power_of_two());
 
     for log_m in (0..a.len().ilog2()).rev() {
@@ -416,12 +384,12 @@ fn neg_intt_in_place(a: &mut [Fq], psi_inv: &[Fq]) {
         });
     }
 
-    let n_inv = Fq::from_u64(a[0].q(), a.len() as u64).inv().unwrap();
+    let n_inv = Zq::from_u64(a[0].q(), a.len() as u64).inv().unwrap();
     a.iter_mut().for_each(|a| *a *= n_inv);
 }
 
 #[inline(always)]
-fn dit_bufferfly(a: &mut Fq, b: &mut Fq, twiddle: &Fq) {
+fn dit_bufferfly(a: &mut Zq, b: &mut Zq, twiddle: &Zq) {
     let tb = twiddle * *b;
     let c = *a + tb;
     let d = *a - tb;
@@ -430,7 +398,7 @@ fn dit_bufferfly(a: &mut Fq, b: &mut Fq, twiddle: &Fq) {
 }
 
 #[inline(always)]
-fn dif_bufferfly(a: &mut Fq, b: &mut Fq, twiddle: &Fq) {
+fn dif_bufferfly(a: &mut Zq, b: &mut Zq, twiddle: &Zq) {
     let c = *a + *b;
     let d = (*a - *b) * twiddle;
     *a = c;
@@ -438,7 +406,7 @@ fn dif_bufferfly(a: &mut Fq, b: &mut Fq, twiddle: &Fq) {
 }
 
 #[inline(always)]
-fn twiddle_free_bufferfly(a: &mut Fq, b: &mut Fq) {
+fn twiddle_free_bufferfly(a: &mut Zq, b: &mut Zq) {
     let c = *a + *b;
     let d = *a - *b;
     *a = c;
@@ -448,20 +416,20 @@ fn twiddle_free_bufferfly(a: &mut Fq, b: &mut Fq) {
 #[cfg(test)]
 mod test {
     use crate::util::{
-        fq::two_adic_primes,
-        poly::{neg_schoolbook_mul, Poly},
+        poly::{nega_cyclic_schoolbook_mul, NegaCyclicPoly},
+        zq::two_adic_primes,
     };
     use core::array::from_fn;
     use rand::thread_rng;
 
     #[test]
-    fn neg_mul() {
+    fn nega_cyclic_mul() {
         let mut rng = thread_rng();
         for log_n in 0..10 {
             let n = 1 << log_n;
             for q in two_adic_primes(45, log_n + 1).take(10) {
-                let [a, b] = &from_fn(|_| Poly::sample_fq_uniform(n, q, &mut rng));
-                assert_eq!(a * b, neg_schoolbook_mul(a, b));
+                let [a, b] = &from_fn(|_| NegaCyclicPoly::sample_zq_uniform(n, q, &mut rng));
+                assert_eq!(a * b, nega_cyclic_schoolbook_mul(a, b));
             }
         }
     }

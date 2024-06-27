@@ -3,7 +3,7 @@ use core::{
     cmp::Ordering,
     fmt::{self, Display, Formatter},
     iter::{successors, Product, Sum},
-    ops::{AddAssign, MulAssign, Neg, SubAssign},
+    ops::{AddAssign, Deref, MulAssign, Neg, SubAssign},
 };
 use itertools::Itertools;
 use num_bigint::{BigUint, ToBigUint};
@@ -13,17 +13,17 @@ use num_traits::ToPrimitive;
 use rand::RngCore;
 use rand_distr::{Distribution, Uniform};
 use std::{
-    collections::HashMap,
-    sync::{Mutex, OnceLock},
+    collections::{hash_map::Entry, HashMap},
+    sync::{Mutex, MutexGuard, OnceLock},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Fq {
+pub struct Zq {
     q: u64,
     v: u64,
 }
 
-impl Fq {
+impl Zq {
     pub fn q(&self) -> u64 {
         self.q
     }
@@ -68,17 +68,17 @@ impl Fq {
     }
 
     pub fn sample_uniform(q: u64, rng: &mut impl RngCore) -> Self {
-        Fq::from_u64(q, Uniform::new(0, q).sample(rng))
+        Zq::from_u64(q, Uniform::new(0, q).sample(rng))
     }
 
     pub fn sample_i8(q: u64, dist: &impl Distribution<i8>, rng: &mut impl RngCore) -> Self {
-        Fq::from_i8(q, dist.sample(rng))
+        Zq::from_i8(q, dist.sample(rng))
     }
 
     pub fn generator(q: u64) -> Self {
         let order = q - 1;
         (1..order)
-            .map(|g| Fq::from_u64(q, g))
+            .map(|g| Zq::from_u64(q, g))
             .find(|g| g.pow(order >> 1).v == order)
             .unwrap()
     }
@@ -92,7 +92,7 @@ impl Fq {
     }
 
     pub fn powers(self) -> impl Iterator<Item = Self> {
-        successors(Some(Fq::from_i8(self.q, 1)), move |v| Some(v * self))
+        successors(Some(Zq::from_i8(self.q, 1)), move |v| Some(v * self))
     }
 
     pub fn inv(self) -> Option<Self> {
@@ -115,60 +115,60 @@ impl Fq {
     }
 }
 
-impl From<&Fq> for u64 {
-    fn from(value: &Fq) -> Self {
+impl From<&Zq> for u64 {
+    fn from(value: &Zq) -> Self {
         value.v
     }
 }
 
-impl From<&Fq> for i64 {
-    fn from(value: &Fq) -> Self {
+impl From<&Zq> for i64 {
+    fn from(value: &Zq) -> Self {
         value.into_center_signed()
     }
 }
 
-impl From<Fq> for f64 {
-    fn from(value: Fq) -> Self {
+impl From<Zq> for f64 {
+    fn from(value: Zq) -> Self {
         value.into_center_signed() as f64
     }
 }
 
-impl From<&Fq> for f64 {
-    fn from(value: &Fq) -> Self {
+impl From<&Zq> for f64 {
+    fn from(value: &Zq) -> Self {
         value.into_center_signed() as f64
     }
 }
 
-impl Ord for Fq {
+impl Ord for Zq {
     fn cmp(&self, other: &Self) -> Ordering {
         assert_eq!(self.q, other.q);
         self.v.cmp(&other.v)
     }
 }
 
-impl PartialOrd for Fq {
+impl PartialOrd for Zq {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Display for Fq {
+impl Display for Zq {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.v)
     }
 }
 
-impl Neg for &Fq {
-    type Output = Fq;
+impl Neg for &Zq {
+    type Output = Zq;
 
     #[inline(always)]
     fn neg(self) -> Self::Output {
-        Fq::from_u64(self.q, self.q - self.v)
+        Zq::from_u64(self.q, self.q - self.v)
     }
 }
 
-impl Neg for Fq {
-    type Output = Fq;
+impl Neg for Zq {
+    type Output = Zq;
 
     #[inline(always)]
     fn neg(self) -> Self::Output {
@@ -176,38 +176,38 @@ impl Neg for Fq {
     }
 }
 
-impl AddAssign<&Fq> for Fq {
+impl AddAssign<&Zq> for Zq {
     #[inline(always)]
-    fn add_assign(&mut self, rhs: &Fq) {
+    fn add_assign(&mut self, rhs: &Zq) {
         assert_eq!(self.q, rhs.q);
         *self = Self::from_u128(self.q, self.v as u128 + rhs.v as u128);
     }
 }
 
-impl SubAssign<&Fq> for Fq {
+impl SubAssign<&Zq> for Zq {
     #[inline(always)]
-    fn sub_assign(&mut self, rhs: &Fq) {
+    fn sub_assign(&mut self, rhs: &Zq) {
         assert_eq!(self.q, rhs.q);
         *self += -rhs;
     }
 }
 
-impl MulAssign<&Fq> for Fq {
+impl MulAssign<&Zq> for Zq {
     #[inline(always)]
-    fn mul_assign(&mut self, rhs: &Fq) {
+    fn mul_assign(&mut self, rhs: &Zq) {
         assert_eq!(self.q, rhs.q);
         *self = Self::from_u128(self.q, self.v as u128 * rhs.v as u128);
     }
 }
 
-impl<T: Borrow<Fq>> Sum<T> for Fq {
+impl<T: Borrow<Zq>> Sum<T> for Zq {
     fn sum<I: Iterator<Item = T>>(mut iter: I) -> Self {
         let init = *iter.next().unwrap().borrow();
         iter.fold(init, |acc, item| acc + item.borrow())
     }
 }
 
-impl<T: Borrow<Fq>> Product<T> for Fq {
+impl<T: Borrow<Zq>> Product<T> for Zq {
     fn product<I: Iterator<Item = T>>(mut iter: I) -> Self {
         let init = *iter.next().unwrap().borrow();
         iter.fold(init, |acc, item| acc * item.borrow())
@@ -218,7 +218,7 @@ macro_rules! impl_op {
     (@ impl $trait:ident<$rhs:ty> for $lhs:ty; $lhs_convert:expr) => {
         paste::paste! {
             impl core::ops::$trait<$rhs> for $lhs {
-                type Output = Fq;
+                type Output = Zq;
 
                 #[inline(always)]
                 fn [<$trait:lower>](self, rhs: $rhs) -> Self::Output {
@@ -248,15 +248,15 @@ macro_rules! impl_op {
 }
 
 impl_op!(
-    impl Add<Fq> for Fq,
-    impl Sub<Fq> for Fq,
-    impl Mul<Fq> for Fq,
+    impl Add<Zq> for Zq,
+    impl Sub<Zq> for Zq,
+    impl Mul<Zq> for Zq,
 );
 
 macro_rules! impl_op_with_primitive {
-    (@ impl $trait:ident<&$p:ty> for Fq) => {
+    (@ impl $trait:ident<&$p:ty> for Zq) => {
         paste::paste! {
-            impl core::ops::$trait<&$p> for Fq {
+            impl core::ops::$trait<&$p> for Zq {
                 #[inline(always)]
                 fn [<$trait:snake:lower>](&mut self, rhs: &$p) {
                     self.[<$trait:snake:lower>](Self::[<from_ $p>](self.q, *rhs));
@@ -264,39 +264,39 @@ macro_rules! impl_op_with_primitive {
             }
         }
     };
-    ($(impl $trait:ident<&$p:ty> for Fq),* $(,)?) => {
-        $(impl_op_with_primitive!(@ impl $trait<&$p> for Fq);)*
+    ($(impl $trait:ident<&$p:ty> for Zq),* $(,)?) => {
+        $(impl_op_with_primitive!(@ impl $trait<&$p> for Zq);)*
     };
     ($($p1:ty $(as $p2:ty)?),* $(,)?) => {
         $(
             $(
                 paste::paste! {
-                    impl Fq {
+                    impl Zq {
                         pub fn [<from_ $p1>](q: u64, v: $p1) -> Self {
                             Self::[<from_ $p2>](q, v as $p2)
                         }
                     }
                 }
-                impl From<&Fq> for $p1 {
-                    fn from(value: &Fq) -> $p1 {
+                impl From<&Zq> for $p1 {
+                    fn from(value: &Zq) -> $p1 {
                         <$p2>::from(value).try_into().unwrap()
                     }
                 }
             )?
-            impl From<Fq> for $p1 {
-                fn from(value: Fq) -> $p1 {
+            impl From<Zq> for $p1 {
+                fn from(value: Zq) -> $p1 {
                     (&value).into()
                 }
             }
             impl_op_with_primitive!(
-                impl AddAssign<&$p1> for Fq,
-                impl SubAssign<&$p1> for Fq,
-                impl MulAssign<&$p1> for Fq,
+                impl AddAssign<&$p1> for Zq,
+                impl SubAssign<&$p1> for Zq,
+                impl MulAssign<&$p1> for Zq,
             );
             impl_op!(
-                impl Add<$p1> for Fq,
-                impl Sub<$p1> for Fq,
-                impl Mul<$p1> for Fq,
+                impl Add<$p1> for Zq,
+                impl Sub<$p1> for Zq,
+                impl Mul<$p1> for Zq,
             );
         )*
     };
@@ -315,41 +315,63 @@ impl_op_with_primitive!(
     isize as i64,
 );
 
-pub static NEG_NTT_PSI: OnceLock<Mutex<HashMap<u64, [Vec<Fq>; 2]>>> = OnceLock::new();
-
 pub fn two_adic_primes(bits: usize, log_n: usize) -> impl Iterator<Item = u64> {
     assert!(bits > log_n);
-
     let (min, max) = (1 << (bits - log_n - 1), 1 << (bits - log_n));
-    primes((min..max).rev().map(move |q| (q << log_n) + 1)).map(|q| {
-        NEG_NTT_PSI
-            .get_or_init(Default::default)
-            .lock()
-            .unwrap()
-            .entry(q)
-            .or_insert_with(|| neg_ntt_psi(q));
-        q
-    })
+    primes((min..max).rev().map(move |q| (q << log_n) + 1))
 }
 
 fn primes(candidates: impl IntoIterator<Item = u64>) -> impl Iterator<Item = u64> {
     candidates
         .into_iter()
-        .filter(|candidate| probably_prime(&(*candidate).into(), 20))
+        .filter(|candidate| is_prime(*candidate))
 }
 
-fn neg_ntt_psi(q: u64) -> [Vec<Fq>; 2] {
+fn is_prime(q: impl Into<num_bigint_dig::BigUint>) -> bool {
+    probably_prime(&q.into(), 20)
+}
+
+static TWIDDLE: OnceLock<Mutex<HashMap<u64, [Vec<Zq>; 2]>>> = OnceLock::new();
+
+pub struct Twiddle<'a>(MutexGuard<'a, HashMap<u64, [Vec<Zq>; 2]>>, u64);
+
+impl<'a> Twiddle<'a> {
+    pub fn get(&self) -> Option<&[Vec<Zq>; 2]> {
+        self.0.get(&self.1)
+    }
+}
+
+impl<'a> Deref for Twiddle<'a> {
+    type Target = [Vec<Zq>; 2];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0[&self.1]
+    }
+}
+
+// Twiddle factors in bit-reversed order.
+pub fn twiddle<'a>(q: u64) -> Twiddle<'a> {
+    let mut guard = TWIDDLE.get_or_init(Default::default).lock().unwrap();
+    if let Entry::Vacant(entry) = guard.entry(q) {
+        if is_prime(q) {
+            entry.insert(compute_twiddle(q));
+        }
+    }
+    Twiddle(guard, q)
+}
+
+fn compute_twiddle(q: u64) -> [Vec<Zq>; 2] {
     let order = q - 1;
     let s = order.trailing_zeros();
-    let psi = {
-        let g = Fq::generator(q);
+    let twiddle = {
+        let g = Zq::generator(q);
         let rou = g.pow(order >> s);
-        let mut psi = rou.powers().take(1 << (s - 1)).collect_vec();
-        bit_reverse(&mut psi);
-        psi
+        let mut twiddle = rou.powers().take(1 << (s - 1)).collect_vec();
+        bit_reverse(&mut twiddle);
+        twiddle
     };
-    let psi_inv = psi.iter().map(|v| v.inv().unwrap()).collect();
-    [psi, psi_inv]
+    let twiddle_inv = twiddle.iter().map(|v| v.inv().unwrap()).collect();
+    [twiddle, twiddle_inv]
 }
 
 fn bit_reverse<T>(values: &mut [T]) {

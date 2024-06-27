@@ -1,6 +1,6 @@
 use crate::{
     rlwe::{Rlwe, RlweCiphertext, RlweParam, RlwePlaintext, RlwePublicKey, RlweSecretKey},
-    util::{AVec, Decomposable, Decomposor, Dot, Fq, Poly},
+    util::{AVec, Decomposable, Decomposor, Dot, Rq, Zq},
 };
 use core::{borrow::Borrow, iter::repeat_with};
 use derive_more::{Add, AddAssign, Deref, Sub, SubAssign};
@@ -33,17 +33,17 @@ pub type RgswSecretKey = RlweSecretKey;
 pub type RgswPublicKey = RlwePublicKey;
 
 #[derive(Clone, Debug)]
-pub struct RgswPlaintext(pub(crate) Poly<Fq>);
+pub struct RgswPlaintext(pub(crate) Rq);
 
 #[derive(Clone, Debug, Add, Sub, AddAssign, SubAssign)]
 pub struct RgswCiphertext(AVec<RlweCiphertext>);
 
 impl RgswCiphertext {
-    pub fn a(&self) -> impl Iterator<Item = &Poly<Fq>> {
+    pub fn a(&self) -> impl Iterator<Item = &Rq> {
         self.0.iter().map(|ct| ct.a())
     }
 
-    pub fn b(&self) -> impl Iterator<Item = &Poly<Fq>> {
+    pub fn b(&self) -> impl Iterator<Item = &Rq> {
         self.0.iter().map(|ct| ct.b())
     }
 }
@@ -53,16 +53,16 @@ impl Rgsw {
         Rlwe::key_gen(param, rng)
     }
 
-    pub fn encode(param: &RgswParam, m: Poly<Fq>) -> RgswPlaintext {
+    pub fn encode(param: &RgswParam, m: Rq) -> RgswPlaintext {
         assert_eq!(m.n(), param.n());
         assert!(m.iter().all(|m| m.q() == param.p()));
-        let to_fq = |m: Fq| Fq::from_u64(param.q(), m.into());
-        RgswPlaintext(m.into_iter().map(to_fq).collect())
+        let to_zq = |m: Zq| Zq::from_u64(param.q(), m.into());
+        RgswPlaintext(m.into_iter().map(to_zq).collect())
     }
 
-    pub fn decode(param: &RgswParam, pt: RgswPlaintext) -> Poly<Fq> {
-        let to_fp = |m: Fq| Fq::from_u64(param.p(), m.into());
-        pt.0.into_iter().map(to_fp).collect()
+    pub fn decode(param: &RgswParam, pt: RgswPlaintext) -> Rq {
+        let to_zp = |m: Zq| Zq::from_u64(param.p(), m.into());
+        pt.0.into_iter().map(to_zp).collect()
     }
 
     pub fn sk_encrypt(
@@ -89,7 +89,7 @@ impl Rgsw {
         pt: RgswPlaintext,
         rng: &mut impl RngCore,
     ) -> RgswCiphertext {
-        let zero = RlwePlaintext(Poly::zero(param.n(), param.q()));
+        let zero = RlwePlaintext(Rq::zero(param.n(), param.q()));
         let rlwe_encrypt_zero = || match key {
             Either::Left(sk) => Rlwe::sk_encrypt(param, sk, zero.clone(), rng),
             Either::Right(pk) => Rlwe::pk_encrypt(param, pk, zero.clone(), rng),
@@ -150,7 +150,7 @@ mod test {
     use crate::{
         rgsw::{Rgsw, RgswParam},
         rlwe::{test::testing_n_q, Rlwe, RlweParam},
-        util::Poly,
+        util::Rq,
     };
     use core::array::from_fn;
     use rand::thread_rng;
@@ -162,7 +162,7 @@ mod test {
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RgswParam::new(RlweParam::new(q, p, log_n), log_b, d);
             let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
-            let m = Poly::sample_fq_uniform(param.n(), p, &mut rng);
+            let m = Rq::sample_zq_uniform(param.n(), p, &mut rng);
             let pt0 = Rgsw::encode(&param, m.clone());
             let pt1 = Rgsw::encode(&param, m.clone());
             let ct0 = Rgsw::sk_encrypt(&param, &sk, pt0, &mut rng);
@@ -179,7 +179,7 @@ mod test {
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RgswParam::new(RlweParam::new(q, p, log_n), log_b, d);
             let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
-            let [m0, m1] = &from_fn(|_| Poly::sample_fq_uniform(param.n(), p, &mut rng));
+            let [m0, m1] = &from_fn(|_| Rq::sample_zq_uniform(param.n(), p, &mut rng));
             let [pt0, pt1] = [m0, m1].map(|m| Rgsw::encode(&param, m.clone()));
             let [ct0, ct1] = [pt0, pt1].map(|pt| Rgsw::pk_encrypt(&param, &pk, pt, &mut rng));
             let (m2, ct2) = (m0 + m1, ct0.clone() + ct1.clone());
@@ -196,7 +196,7 @@ mod test {
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RgswParam::new(RlweParam::new(q, p, log_n), log_b, d);
             let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
-            let [m0, m1] = from_fn(|_| Poly::sample_fq_uniform(param.n(), p, &mut rng));
+            let [m0, m1] = from_fn(|_| Rq::sample_zq_uniform(param.n(), p, &mut rng));
             let ct0 = Rgsw::pk_encrypt(&param, &pk, Rgsw::encode(&param, m0.clone()), &mut rng);
             let ct1 = Rlwe::pk_encrypt(&param, &pk, Rlwe::encode(&param, m1.clone()), &mut rng);
             let ct2 = Rgsw::external_product(&param, ct0, ct1);
@@ -212,7 +212,7 @@ mod test {
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RgswParam::new(RlweParam::new(q, p, log_n), log_b, d);
             let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
-            let [m0, m1] = &from_fn(|_| Poly::sample_fq_uniform(param.n(), p, &mut rng));
+            let [m0, m1] = &from_fn(|_| Rq::sample_zq_uniform(param.n(), p, &mut rng));
             let [pt0, pt1] = [m0, m1].map(|m| Rgsw::encode(&param, m.clone()));
             let [ct0, ct1] = [pt0, pt1].map(|pt| Rgsw::pk_encrypt(&param, &pk, pt, &mut rng));
             let ct2 = Rgsw::internal_product(&param, ct0, ct1);

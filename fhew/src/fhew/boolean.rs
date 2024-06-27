@@ -3,7 +3,7 @@ use crate::{
     fhew::Fhew,
     lwe::{Lwe, LweCiphertext, LweDecryptionShare, LweSecretKey},
     rlwe::{Rlwe, RlwePublicKey},
-    util::{Fq, Poly},
+    util::{Rq, Zq},
 };
 use core::{borrow::Borrow, ops::Not};
 use rand::RngCore;
@@ -18,7 +18,7 @@ impl<T: Borrow<BootstrappingParam>> FhewBool<T> {
     pub fn sk_encrypt(bk: T, sk: &LweSecretKey, m: bool, rng: &mut impl RngCore) -> Self {
         let param = bk.borrow();
         assert_eq!(param.p(), 4);
-        let m = Fq::from_bool(param.p(), m);
+        let m = Zq::from_bool(param.p(), m);
         let pt = Lwe::encode(param.lwe_z(), m);
         let ct = Lwe::sk_encrypt(param.lwe_z(), sk, pt, rng);
         Self { ct, bk }
@@ -27,10 +27,10 @@ impl<T: Borrow<BootstrappingParam>> FhewBool<T> {
     pub fn pk_encrypt(bk: T, pk: &RlwePublicKey, m: bool, rng: &mut impl RngCore) -> Self {
         let param = bk.borrow();
         assert_eq!(param.p(), 4);
-        let m = Poly::constant(param.n(), Fq::from_bool(param.p(), m));
-        let pt = Rlwe::encode(param.rgsw(), m);
-        let ct = Rlwe::pk_encrypt(param.rgsw(), pk, pt, rng);
-        let ct = Rlwe::sample_extract(param.rgsw(), ct, 0);
+        let m = Rq::constant(param.n(), Zq::from_bool(param.p(), m));
+        let pt = Rlwe::encode(param.rlwe(), m);
+        let ct = Rlwe::pk_encrypt(param.rlwe(), pk, pt, rng);
+        let ct = Rlwe::sample_extract(param.rlwe(), ct, 0);
         Self { ct, bk }
     }
 
@@ -204,9 +204,9 @@ pub(crate) mod test {
     use crate::{
         bootstrapping::{Bootstrapping, BootstrappingParam},
         fhew::FhewBool,
-        lwe::{Lwe, LweParam},
+        lwe::LweParam,
         rgsw::RgswParam,
-        rlwe::{Rlwe, RlweParam},
+        rlwe::{Rlwe, RlweParam, RlweSecretKey},
         util::two_adic_primes,
     };
     use core::array::from_fn;
@@ -242,8 +242,8 @@ pub(crate) mod test {
     fn encrypt_decrypt() {
         let mut rng = thread_rng();
         let param = single_key_testing_param();
-        let sk = Lwe::sk_gen(param.lwe_z(), &mut rng);
-        let pk = Rlwe::pk_gen(param.rgsw(), &(&sk).into(), &mut rng);
+        let sk = Rlwe::sk_gen(param.rlwe(), &mut rng);
+        let pk = Rlwe::pk_gen(param.rlwe(), &sk, &mut rng);
         for m in 0..1 << 1 {
             let m = m == 1;
             let ct0 = FhewBool::sk_encrypt(&param, &sk, m, &mut rng);
@@ -257,7 +257,7 @@ pub(crate) mod test {
     fn op() {
         let mut rng = thread_rng();
         let param = single_key_testing_param();
-        let sk = Lwe::sk_gen(param.lwe_z(), &mut rng);
+        let sk = Rlwe::sk_gen(param.rlwe(), &mut rng);
         let bk = Bootstrapping::key_gen(&param, &sk, &mut rng);
         let encrypt = |m| FhewBool::sk_encrypt(&bk, &sk, m, &mut thread_rng());
 
@@ -293,7 +293,7 @@ pub(crate) mod test {
     fn add_sub() {
         let mut rng = thread_rng();
         let param = single_key_testing_param();
-        let sk = Lwe::sk_gen(param.lwe_z(), &mut rng);
+        let sk = Rlwe::sk_gen(param.rlwe(), &mut rng);
         let bk = Bootstrapping::key_gen(&param, &sk, &mut rng);
         let encrypt = |m| FhewBool::sk_encrypt(&bk, &sk, m, &mut thread_rng());
 
@@ -341,11 +341,11 @@ pub(crate) mod test {
         let mut rng = thread_rng();
         let param = multi_key_testing_param();
         let crs = Bootstrapping::crs_gen(&param, &mut rng);
-        let sk_shares: [_; N] = from_fn(|_| Lwe::sk_gen(param.lwe_z(), &mut rng));
+        let sk_shares: [_; N] = from_fn(|_| Rlwe::sk_gen(param.rlwe(), &mut rng));
         let pk = {
-            let pk_share_gen = |sk| Rlwe::pk_share_gen(param.rgsw(), crs.pk(), &sk, &mut rng);
-            let pk_shares = sk_shares.each_ref().map(|sk| sk.into()).map(pk_share_gen);
-            Rlwe::pk_share_merge(param.rgsw(), crs.pk().clone(), pk_shares)
+            let pk_share_gen = |sk| Rlwe::pk_share_gen(param.rlwe(), crs.pk(), sk, &mut rng);
+            let pk_shares = sk_shares.each_ref().map(pk_share_gen);
+            Rlwe::pk_share_merge(param.rlwe(), crs.pk().clone(), pk_shares)
         };
         let bk = {
             let bk_share_gen = |sk| Bootstrapping::key_share_gen(&param, &crs, sk, &pk, &mut rng);
@@ -357,7 +357,7 @@ pub(crate) mod test {
         macro_rules! assert_decrypted_to {
             ($ct:expr, $m:expr) => {{
                 let ct = $ct;
-                let share_decrypt = |sk| ct.share_decrypt(sk, &mut rng);
+                let share_decrypt = |sk: &RlweSecretKey| ct.share_decrypt(sk, &mut rng);
                 let d_shares = sk_shares.each_ref().map(share_decrypt);
                 assert_eq!(ct.decryption_share_merge(d_shares), $m);
             }};

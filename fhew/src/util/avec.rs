@@ -1,9 +1,9 @@
-use crate::util::fq::Fq;
+use crate::util::zq::Zq;
 use core::{
     borrow::Borrow,
     fmt::{self, Display, Formatter},
     iter::{repeat_with, Sum},
-    ops::AddAssign,
+    ops::{AddAssign, Neg},
     slice,
 };
 use derive_more::{Deref, DerefMut, From, Into};
@@ -20,22 +20,40 @@ impl<T> AVec<T> {
     }
 }
 
-impl AVec<Fq> {
+impl<T: Copy + Neg<Output = T>> AVec<T> {
+    pub fn automorphism(&self, t: i64) -> Self {
+        assert!(self.len().is_power_of_two());
+        let mut v = self.clone();
+        let n = self.len();
+        let t = t.rem_euclid(2 * n as i64) as usize;
+        (0..n).for_each(|i| {
+            let it = (i * t) % (2 * n);
+            if it < n {
+                v[it] = self[i]
+            } else {
+                v[it - n] = -self[i]
+            }
+        });
+        v
+    }
+}
+
+impl AVec<Zq> {
     pub fn zero(n: usize, q: u64) -> Self {
-        Self(vec![Fq::from_u64(q, 0); n])
+        Self(vec![Zq::from_u64(q, 0); n])
     }
 
-    pub fn sample_fq_uniform(n: usize, q: u64, rng: &mut impl RngCore) -> Self {
-        repeat_with(|| Fq::sample_uniform(q, rng)).take(n).collect()
+    pub fn sample_zq_uniform(n: usize, q: u64, rng: &mut impl RngCore) -> Self {
+        repeat_with(|| Zq::sample_uniform(q, rng)).take(n).collect()
     }
 
-    pub fn sample_fq_from_i8(
+    pub fn sample_zq_from_i8(
         n: usize,
         q: u64,
         dist: &impl Distribution<i8>,
         rng: &mut impl RngCore,
     ) -> Self {
-        repeat_with(|| Fq::sample_i8(q, dist, rng))
+        repeat_with(|| Zq::sample_i8(q, dist, rng))
             .take(n)
             .collect()
     }
@@ -133,7 +151,7 @@ macro_rules! impl_element_wise_op_assign {
                 for<$life> $t: $constraint,
             {
                 fn [<$trait:snake:lower>](&mut self, rhs: $rhs) {
-                    crate::util::izip_eq!(self, rhs).for_each(|(lhs, rhs)| lhs.[<$trait:snake:lower>](rhs));
+                    $crate::util::izip_eq!(self, rhs).for_each(|(lhs, rhs)| lhs.[<$trait:snake:lower>](rhs));
                 }
             }
         }
@@ -177,7 +195,7 @@ macro_rules! impl_element_wise_op {
                 type Output = $out;
 
                 fn [<$trait:lower>](self, rhs: $rhs) -> Self::Output {
-                    crate::util::izip_eq!(self, rhs).map(|(lhs, rhs)| lhs.[<$trait:lower>](rhs)).collect()
+                    $crate::util::izip_eq!(self, rhs).map(|(lhs, rhs)| lhs.[<$trait:lower>](rhs)).collect()
                 }
             }
         }
@@ -256,3 +274,25 @@ pub(crate) use {
     impl_element_wise_neg, impl_element_wise_op, impl_element_wise_op_assign,
     impl_mul_assign_element, impl_mul_element,
 };
+
+macro_rules! impl_avec_i8_mul_zq {
+    ($(impl Mul<$rhs:ty> for $lhs:ty),* $(,)?) => {
+        $(
+            impl core::ops::Mul<$rhs> for $lhs {
+                type Output = AVec<Zq>;
+
+                fn mul(self, rhs: $rhs) -> AVec<Zq> {
+                    let q = rhs.q();
+                    self.iter().map(|v| Zq::from_i8(q, *v) * rhs).collect()
+                }
+            }
+        )*
+    };
+}
+
+impl_avec_i8_mul_zq!(
+    impl Mul<Zq> for AVec<i8>,
+    impl Mul<&Zq> for AVec<i8>,
+    impl Mul<Zq> for &AVec<i8>,
+    impl Mul<&Zq> for &AVec<i8>,
+);
