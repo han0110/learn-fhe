@@ -35,6 +35,11 @@ impl Zq {
         Self { q, v: v as u64 }
     }
 
+    pub fn from_biguint(q: u64, v: &BigUint) -> Self {
+        let v = (v % q).to_u64().unwrap();
+        Self { q, v }
+    }
+
     pub fn from_u128(q: u64, v: u128) -> Self {
         let v = (v % q as u128) as u64;
         Self { q, v }

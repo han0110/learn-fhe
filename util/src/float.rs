@@ -290,7 +290,7 @@ impl Distribution<BigFloat> for Standard {
 
 #[macro_export]
 macro_rules! assert_eq_float {
-    (@ $precision:literal, $lhs:expr, $rhs:expr $(,$field:literal)?) => {{
+    (@ $precision:expr, $lhs:expr, $rhs:expr $(,$field:literal)?) => {{
         let (lhs, rhs) = ($lhs, $rhs);
         let diff = (lhs - rhs).abs();
         assert!(
@@ -306,7 +306,7 @@ macro_rules! assert_eq_float {
             rhs,
         );
     }};
-    ($lhs:expr, $rhs:expr, $precision:literal $(,)?) => {
+    ($lhs:expr, $rhs:expr, $precision:expr $(,)?) => {
         $crate::assert_eq_float!(@ $precision, $lhs, $rhs);
     };
     ($lhs:expr, $rhs:expr $(,)?) => {
@@ -316,7 +316,7 @@ macro_rules! assert_eq_float {
 
 #[macro_export]
 macro_rules! assert_eq_complex {
-    ($lhs:expr, $rhs:expr, $precision:literal $(,)?) => {{
+    ($lhs:expr, $rhs:expr, $precision:expr $(,)?) => {{
         let (lhs, rhs) = (&$lhs, &$rhs);
         $crate::assert_eq_float!(@ $precision, &lhs.re, &rhs.re, "re");
         $crate::assert_eq_float!(@ $precision, &lhs.im, &rhs.im, "im");

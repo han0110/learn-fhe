@@ -14,12 +14,14 @@ where
     successors(Some(T::one()), move |pow| Some(pow * base))
 }
 
-pub fn horner<L, R>(coeffs: &[L], x: &R) -> L
+pub fn horner<'a, L, R, IL>(coeffs: IL, x: &'a R) -> L
 where
-    for<'t> L: Clone + Mul<&'t R, Output = L> + Add<&'t L, Output = L>,
+    L: 'a + Clone + Mul<&'a R, Output = L> + Add<&'a L, Output = L>,
+    IL: IntoIterator<Item = &'a L, IntoIter: DoubleEndedIterator>,
 {
-    let (init, coeffs) = coeffs.split_last().unwrap();
-    coeffs.iter().rev().fold(init.clone(), |acc, c| acc * x + c)
+    let mut coeffs = coeffs.into_iter().rev();
+    let init = coeffs.next().unwrap();
+    coeffs.fold(init.clone(), |acc, c| acc * x + c)
 }
 
 pub fn bit_reverse<T>(values: &mut [T]) {
@@ -115,5 +117,15 @@ macro_rules! cartesian {
         let t = $crate::cartesian_product!($first);
         $(let t = $crate::cartesian_product!(t, $rest);)*
         t.map($crate::cartesian_product!(@closure a => (a) $(, $rest)*))
+    };
+}
+
+#[macro_export]
+macro_rules! vec_with {
+    [|| $f:expr; $n:expr] => {
+        core::iter::repeat_with(|| $f).take($n).collect::<Vec<_>>()
+    };
+    [|$v:ident| $f:expr; $vs:expr] => {
+        $vs.into_iter().map(|$v| $f).collect::<Vec<_>>()
     };
 }

@@ -1,10 +1,8 @@
 use derive_more::{Add, Sub};
 use itertools::{chain, izip, Itertools};
-use num_bigint::BigInt;
+use num_bigint::{BigInt, BigUint};
 use rand::RngCore;
-use util::{
-    bit_reverse, dg, horner, powers, two_adic_primes, zo, AVec, BigFloat, Complex, CrtRq, Zq,
-};
+use util::{bit_reverse, dg, powers, two_adic_primes, zo, AVec, BigFloat, Complex, CrtRq, Zq};
 
 #[derive(Clone, Debug)]
 pub struct Ckks;
@@ -14,7 +12,9 @@ pub struct CkksParam {
     log_n: usize,
     pow5: Vec<usize>,
     psi: Vec<Complex>,
+    big_l: usize,
     qs: Vec<u64>,
+    ps: Vec<u64>,
     scale: BigFloat,
 }
 
@@ -39,8 +39,24 @@ impl CkksParam {
         &self.pow5
     }
 
+    pub fn big_l(&self) -> usize {
+        self.big_l
+    }
+
     pub fn qs(&self) -> &[u64] {
         &self.qs
+    }
+
+    pub fn ps(&self) -> &[u64] {
+        &self.ps
+    }
+
+    pub fn qps(&self) -> Vec<u64> {
+        chain![self.qs(), self.ps()].copied().collect()
+    }
+
+    pub fn p(&self) -> BigUint {
+        self.ps.iter().product()
     }
 
     pub fn scale(&self) -> &BigFloat {
@@ -55,7 +71,22 @@ pub struct CkksSecretKey(AVec<i8>);
 pub struct CkksPublicKey(CrtRq, CrtRq);
 
 #[derive(Clone, Debug)]
-pub struct CkksEvaluationKey;
+pub struct CkksEvaluationKey {
+    mul: CkksKeySwitchingKey,
+}
+
+#[derive(Clone, Debug)]
+pub struct CkksKeySwitchingKey(CrtRq, CrtRq);
+
+impl CkksKeySwitchingKey {
+    pub fn a(&self) -> &CrtRq {
+        &self.1
+    }
+
+    pub fn b(&self) -> &CrtRq {
+        &self.0
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct CkksCleartext(AVec<Complex>);
@@ -64,11 +95,22 @@ pub struct CkksCleartext(AVec<Complex>);
 pub struct CkksPlaintext(CrtRq);
 
 #[derive(Clone, Debug, Add, Sub)]
-pub struct CkksCiphertext(AVec<CrtRq>);
+pub struct CkksCiphertext(CrtRq, CrtRq);
+
+impl CkksCiphertext {
+    pub fn a(&self) -> &CrtRq {
+        &self.1
+    }
+
+    pub fn b(&self) -> &CrtRq {
+        &self.0
+    }
+}
 
 impl Ckks {
-    pub fn param_gen(log_n: usize, log_qi: usize, num_qs: usize) -> CkksParam {
+    pub fn param_gen(log_n: usize, log_qi: usize, big_l: usize) -> CkksParam {
         assert!(log_n >= 1);
+        assert!(big_l > 1);
 
         let n = 1 << log_n;
 
@@ -83,9 +125,9 @@ impl Ckks {
             five.powers().take(2 * n).map_into().collect()
         };
 
-        let qs = two_adic_primes(log_qi, log_n + 1)
-            .take(num_qs)
-            .collect_vec();
+        let mut primes = two_adic_primes(log_qi, log_n + 1);
+        let qs = primes.by_ref().take(big_l).collect_vec();
+        let ps = primes.by_ref().take(big_l).collect_vec();
 
         let scale = BigFloat::from(*qs.last().unwrap());
 
@@ -93,7 +135,9 @@ impl Ckks {
             log_n,
             psi,
             pow5,
+            big_l,
             qs,
+            ps,
             scale,
         }
     }
@@ -102,15 +146,21 @@ impl Ckks {
         param: &CkksParam,
         rng: &mut impl RngCore,
     ) -> (CkksSecretKey, CkksPublicKey, CkksEvaluationKey) {
-        let sk = AVec::sample(param.n(), zo(0.5), rng);
+        let sk = CkksSecretKey(AVec::sample(param.n(), zo(0.5), rng));
         let pk = {
             let a = CrtRq::sample_uniform(param.n(), param.qs(), rng) as CrtRq;
             let e = CrtRq::sample_i8(param.n(), param.qs(), dg(3.2, 6), rng);
-            let b = -(&a * &sk) + e;
+            let b = -(&a * &sk.0) + e;
             CkksPublicKey(b, a)
         };
-        let ek = CkksEvaluationKey;
-        (CkksSecretKey(sk), pk, ek)
+        let ek = {
+            let mul = {
+                let s_prime = CrtRq::from_i8(&sk.0, &param.qps()).square();
+                Self::ksk_gen(param, &sk, &s_prime, rng)
+            };
+            CkksEvaluationKey { mul }
+        };
+        (sk, pk, ek)
     }
 
     pub fn encode(param: &CkksParam, CkksCleartext(m): CkksCleartext) -> CkksPlaintext {
@@ -155,33 +205,45 @@ impl Ckks {
         let e1 = &CrtRq::sample_i8(param.n(), param.qs(), dg(3.2, 6), &mut *rng);
         let c0 = pk0 * u + e0 + pt;
         let c1 = pk1 * u + e1;
-        CkksCiphertext(AVec::from_iter([c0, c1]))
+        CkksCiphertext(c0, c1)
     }
 
     pub fn decrypt(
         _: &CkksParam,
         CkksSecretKey(sk): &CkksSecretKey,
-        CkksCiphertext(ct): CkksCiphertext,
+        ct: CkksCiphertext,
     ) -> CkksPlaintext {
-        let pt = horner(&ct, sk);
+        let pt = ct.b() + ct.a() * sk;
         CkksPlaintext(pt)
     }
 
-    pub fn eval_mul(
-        _: &CkksParam,
-        _: &CkksEvaluationKey,
-        CkksCiphertext(ct0): CkksCiphertext,
-        CkksCiphertext(ct1): CkksCiphertext,
+    pub fn mul(
+        param: &CkksParam,
+        ek: &CkksEvaluationKey,
+        ct0: CkksCiphertext,
+        ct1: CkksCiphertext,
     ) -> CkksCiphertext {
-        assert_eq!(ct0.len(), 2);
-        assert_eq!(ct1.len(), 2);
-        let ct = [
-            &ct0[0] * &ct1[0],
-            &ct0[0] * &ct1[1] + &ct0[1] * &ct1[0],
-            &ct0[1] * &ct1[1],
-        ]
-        .map(|c| c.rescale());
-        CkksCiphertext(AVec::from_iter(ct))
+        let [d0, d1, d2] = [
+            ct0.b() * ct1.b(),
+            ct0.b() * ct1.a() + ct0.a() * ct1.b(),
+            ct0.a() * ct1.a(),
+        ];
+        let d2 = &d2.extend(param.ps());
+        let c0 = (d0 + (d2 * ek.mul.b()).rescale_k(param.big_l())).rescale();
+        let c1 = (d1 + (d2 * ek.mul.a()).rescale_k(param.big_l())).rescale();
+        CkksCiphertext(c0, c1)
+    }
+
+    pub fn ksk_gen(
+        param: &CkksParam,
+        CkksSecretKey(sk): &CkksSecretKey,
+        s_prime: &CrtRq,
+        rng: &mut impl RngCore,
+    ) -> CkksKeySwitchingKey {
+        let a = CrtRq::sample_uniform(param.n(), &param.qps(), rng) as CrtRq;
+        let e = CrtRq::sample_i8(param.n(), &param.qps(), dg(3.2, 6), rng);
+        let b = -(&a * sk) + e + (s_prime * param.p());
+        CkksKeySwitchingKey(b, a)
     }
 }
 
@@ -240,19 +302,16 @@ mod test {
     use crate::ckks::{special_fft, special_ifft, Ckks, CkksCleartext};
     use core::array::from_fn;
     use itertools::izip;
-    use rand::{
-        rngs::{OsRng, StdRng},
-        RngCore, SeedableRng,
-    };
+    use rand::{rngs::StdRng, SeedableRng};
     use rand_distr::Standard;
-    use util::{assert_eq_complex, horner, AVec, Complex};
+    use util::{assert_eq_complex, horner, vec_with, AVec, Complex};
 
     #[test]
     fn special_ifft_fft() {
-        let rng = &mut StdRng::seed_from_u64(OsRng.next_u64());
-        let (log_qi, num_qs) = (55, 8);
+        let rng = &mut StdRng::from_entropy();
+        let (log_qi, big_l) = (55, 8);
         for log_n in 1..10 {
-            let param = Ckks::param_gen(log_n, log_qi, num_qs);
+            let param = Ckks::param_gen(log_n, log_qi, big_l);
             let evals = AVec::sample(param.l(), Standard, rng);
             let coeffs = special_ifft(&param, evals.clone());
             izip!(param.pow5(), &evals)
@@ -263,10 +322,10 @@ mod test {
 
     #[test]
     fn encrypt_decrypt() {
-        let rng = &mut StdRng::seed_from_u64(OsRng.next_u64());
-        let (log_qi, num_qs) = (55, 8);
+        let rng = &mut StdRng::from_entropy();
+        let (log_qi, big_l) = (55, 8);
         for log_n in 1..10 {
-            let param = Ckks::param_gen(log_n, log_qi, num_qs);
+            let param = Ckks::param_gen(log_n, log_qi, big_l);
             let (sk, pk, _) = Ckks::key_gen(&param, rng);
             let m = AVec::sample(param.l(), Standard, rng);
             let pt = Ckks::encode(&param, CkksCleartext(m.clone()));
@@ -278,10 +337,10 @@ mod test {
 
     #[test]
     fn add_sub() {
-        let rng = &mut StdRng::seed_from_u64(OsRng.next_u64());
-        let (log_qi, num_qs) = (55, 8);
+        let rng = &mut StdRng::from_entropy();
+        let (log_qi, big_l) = (55, 8);
         for log_n in 1..10 {
-            let param = Ckks::param_gen(log_n, log_qi, num_qs);
+            let param = Ckks::param_gen(log_n, log_qi, big_l);
             let (sk, pk, _) = Ckks::key_gen(&param, rng);
             let [m0, m1] = &from_fn(|_| AVec::<Complex>::sample(param.l(), Standard, rng));
             let [pt0, pt1] = [m0, m1].map(|m| Ckks::encode(&param, CkksCleartext(m.clone())));
@@ -296,18 +355,21 @@ mod test {
     }
 
     #[test]
-    fn eval_mul() {
-        let rng = &mut StdRng::seed_from_u64(OsRng.next_u64());
-        let (log_qi, num_qs) = (55, 8);
+    fn mul() {
+        let rng = &mut StdRng::from_entropy();
+        let (log_qi, big_l) = (55, 8);
         for log_n in 1..10 {
-            let param = Ckks::param_gen(log_n, log_qi, num_qs);
+            let param = Ckks::param_gen(log_n, log_qi, big_l);
             let (sk, pk, ek) = Ckks::key_gen(&param, rng);
-            let [m0, m1] = &from_fn(|_| AVec::<Complex>::sample(param.l(), Standard, rng));
-            let [pt0, pt1] = [m0, m1].map(|m| Ckks::encode(&param, CkksCleartext(m.clone())));
-            let [ct0, ct1] = [pt0, pt1].map(|pt| Ckks::encrypt(&param, &pk, pt, rng));
-            let (m2, ct2) = (m0.ew_mul(m1), Ckks::eval_mul(&param, &ek, ct0, ct1));
-            izip!(m2, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct2)).0)
-                .for_each(|(lhs, rhs)| assert_eq_complex!(lhs, rhs, 40));
+            let mul_m = |m0, m1| AVec::ew_mul(&m0, &m1);
+            let mul_ct = |ct0, ct1| Ckks::mul(&param, &ek, ct0, ct1);
+            let ms = vec_with![|| AVec::<Complex>::sample(param.l(), Standard, rng); big_l - 1];
+            let pts = vec_with!(|m| Ckks::encode(&param, CkksCleartext(m.clone())); &ms);
+            let cts = vec_with!(|pt| Ckks::encrypt(&param, &pk, pt, rng); pts);
+            let m = ms.into_iter().reduce(mul_m).unwrap();
+            let ct = cts.into_iter().reduce(mul_ct).unwrap();
+            izip!(m, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct)).0)
+                .for_each(|(lhs, rhs)| assert_eq_complex!(lhs, rhs, 30));
         }
     }
 }
