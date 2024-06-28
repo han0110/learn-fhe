@@ -1,3 +1,4 @@
+use crate::bit_reverse;
 use core::{
     borrow::Borrow,
     cmp::Ordering,
@@ -6,7 +7,7 @@ use core::{
     ops::{AddAssign, Deref, MulAssign, Neg, SubAssign},
 };
 use itertools::Itertools;
-use num_bigint::{BigUint, ToBigUint};
+use num_bigint::{BigInt, BigUint, ToBigUint};
 use num_bigint_dig::prime::probably_prime;
 use num_integer::Integer;
 use num_traits::ToPrimitive;
@@ -26,6 +27,12 @@ pub struct Zq {
 impl Zq {
     pub fn q(&self) -> u64 {
         self.q
+    }
+
+    pub fn from_bigint(q: u64, v: &BigInt) -> Self {
+        let v = (v % q).to_i64().unwrap();
+        let v = if v < 0 { v + q as i64 } else { v };
+        Self { q, v: v as u64 }
     }
 
     pub fn from_u128(q: u64, v: u128) -> Self {
@@ -71,7 +78,7 @@ impl Zq {
         Zq::from_u64(q, Uniform::new(0, q).sample(rng))
     }
 
-    pub fn sample_i8(q: u64, dist: &impl Distribution<i8>, rng: &mut impl RngCore) -> Self {
+    pub fn sample_i8(q: u64, dist: impl Distribution<i8>, rng: &mut impl RngCore) -> Self {
         Zq::from_i8(q, dist.sample(rng))
     }
 
@@ -214,11 +221,11 @@ impl<T: Borrow<Zq>> Product<T> for Zq {
     }
 }
 
-macro_rules! impl_op {
-    (@ impl $trait:ident<$rhs:ty> for $lhs:ty; $lhs_convert:expr) => {
+macro_rules! impl_rest_op_by_op_assign_ref {
+    (@ impl $trait:ident<$rhs:ty> for $lhs:ty; type Output = $out:ty; $lhs_convert:expr) => {
         paste::paste! {
             impl core::ops::$trait<$rhs> for $lhs {
-                type Output = Zq;
+                type Output = $out;
 
                 #[inline(always)]
                 fn [<$trait:lower>](self, rhs: $rhs) -> Self::Output {
@@ -239,19 +246,13 @@ macro_rules! impl_op {
                     }
                 }
             }
-            impl_op!(@ impl $trait<$rhs> for $lhs; core::convert::identity);
-            impl_op!(@ impl $trait<&$rhs> for $lhs; core::convert::identity);
-            impl_op!(@ impl $trait<$rhs> for &$lhs; <_>::clone);
-            impl_op!(@ impl $trait<&$rhs> for &$lhs; <_>::clone);
+            impl_rest_op_by_op_assign_ref!(@ impl $trait<$rhs> for $lhs; type Output = $lhs; core::convert::identity);
+            impl_rest_op_by_op_assign_ref!(@ impl $trait<&$rhs> for $lhs; type Output = $lhs; core::convert::identity);
+            impl_rest_op_by_op_assign_ref!(@ impl $trait<$rhs> for &$lhs; type Output = $lhs; <_>::clone);
+            impl_rest_op_by_op_assign_ref!(@ impl $trait<&$rhs> for &$lhs; type Output = $lhs; <_>::clone);
         )*
     };
 }
-
-impl_op!(
-    impl Add<Zq> for Zq,
-    impl Sub<Zq> for Zq,
-    impl Mul<Zq> for Zq,
-);
 
 macro_rules! impl_op_with_primitive {
     (@ impl $trait:ident<&$p:ty> for Zq) => {
@@ -293,7 +294,7 @@ macro_rules! impl_op_with_primitive {
                 impl SubAssign<&$p1> for Zq,
                 impl MulAssign<&$p1> for Zq,
             );
-            impl_op!(
+            impl_rest_op_by_op_assign_ref!(
                 impl Add<$p1> for Zq,
                 impl Sub<$p1> for Zq,
                 impl Mul<$p1> for Zq,
@@ -302,6 +303,11 @@ macro_rules! impl_op_with_primitive {
     };
 }
 
+impl_rest_op_by_op_assign_ref!(
+    impl Add<Zq> for Zq,
+    impl Sub<Zq> for Zq,
+    impl Mul<Zq> for Zq,
+);
 impl_op_with_primitive!(
     u64,
     i64,
@@ -314,6 +320,8 @@ impl_op_with_primitive!(
     usize as u64,
     isize as i64,
 );
+
+pub(crate) use impl_rest_op_by_op_assign_ref;
 
 pub fn two_adic_primes(bits: usize, log_n: usize) -> impl Iterator<Item = u64> {
     assert!(bits > log_n);
@@ -372,17 +380,4 @@ fn compute_twiddle(q: u64) -> [Vec<Zq>; 2] {
     };
     let twiddle_inv = twiddle.iter().map(|v| v.inv().unwrap()).collect();
     [twiddle, twiddle_inv]
-}
-
-fn bit_reverse<T>(values: &mut [T]) {
-    if values.len() > 2 {
-        assert!(values.len().is_power_of_two());
-        let log_len = values.len().ilog2();
-        for i in 0..values.len() {
-            let j = i.reverse_bits() >> (usize::BITS - log_len);
-            if i < j {
-                values.swap(i, j)
-            }
-        }
-    }
 }

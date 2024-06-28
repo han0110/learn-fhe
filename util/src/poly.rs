@@ -4,7 +4,7 @@ use crate::{
         impl_mul_assign_element, impl_mul_element, AVec,
     },
     izip_eq,
-    zq::{twiddle, Zq},
+    zq::{impl_rest_op_by_op_assign_ref, twiddle, Zq},
 };
 use core::{
     borrow::Borrow,
@@ -16,9 +16,12 @@ use core::{
 };
 use derive_more::{Deref, DerefMut};
 use itertools::izip;
+use num_bigint::BigInt;
 use rand::RngCore;
 use rand_distr::Distribution;
 use std::vec;
+
+pub mod crt;
 
 pub trait Basis: Clone + Copy + Debug + PartialEq + Eq {}
 
@@ -52,7 +55,7 @@ impl<T, B: Basis> NegaCyclicPoly<T, B> {
         self.len()
     }
 
-    pub fn sample(n: usize, dist: &impl Distribution<T>, rng: &mut impl RngCore) -> Self {
+    pub fn sample(n: usize, dist: impl Distribution<T>, rng: &mut impl RngCore) -> Self {
         Self::new(AVec::sample(n, dist, rng))
     }
 }
@@ -63,11 +66,33 @@ impl<T: Copy + Neg<Output = T>> NegaCyclicPoly<T, Coefficient> {
     }
 }
 
-impl NegaCyclicPoly<Zq, Coefficient> {
+impl<B: Basis> NegaCyclicPoly<Zq, B> {
     pub fn zero(n: usize, q: u64) -> Self {
         Self::new(vec![Zq::from_u64(q, 0); n].into())
     }
 
+    pub fn sample_uniform(n: usize, q: u64, rng: &mut impl RngCore) -> Self {
+        Self::new(AVec::sample_uniform(n, q, rng))
+    }
+
+    pub fn mod_switch(&self, q_prime: u64) -> Self {
+        Self::new(self.0.mod_switch(q_prime))
+    }
+
+    pub fn mod_switch_odd(&self, q_prime: u64) -> Self {
+        Self::new(self.0.mod_switch_odd(q_prime))
+    }
+
+    pub fn q(&self) -> u64 {
+        self[0].q()
+    }
+
+    fn from_bigint(v: &[BigInt], q: u64) -> Self {
+        Self::new(v.iter().map(|v| Zq::from_bigint(q, v)).collect())
+    }
+}
+
+impl NegaCyclicPoly<Zq, Coefficient> {
     pub fn one(n: usize, q: u64) -> Self {
         let mut poly = Self::zero(n, q);
         poly[0] += 1;
@@ -80,29 +105,21 @@ impl NegaCyclicPoly<Zq, Coefficient> {
         poly
     }
 
-    pub fn sample_zq_uniform(n: usize, q: u64, rng: &mut impl RngCore) -> Self {
-        Self::new(AVec::sample_zq_uniform(n, q, rng))
-    }
-
-    pub fn sample_zq_from_i8(
+    pub fn sample_i8(
         n: usize,
         q: u64,
-        dist: &impl Distribution<i8>,
+        dist: impl Distribution<i8>,
         rng: &mut impl RngCore,
     ) -> Self {
-        Self::new(AVec::sample_zq_from_i8(n, q, dist, rng))
+        Self::from_i8(&AVec::sample(n, dist, rng), q)
     }
 
-    pub fn mod_switch(&self, q_prime: u64) -> Self {
-        Self::new(self.0.mod_switch(q_prime))
-    }
-
-    pub fn mod_switch_odd(&self, q_prime: u64) -> Self {
-        Self::new(self.0.mod_switch_odd(q_prime))
+    fn from_i8(v: &[i8], q: u64) -> Self {
+        Self::new(v.iter().map(|v| Zq::from_i8(q, *v)).collect())
     }
 
     pub fn to_evaluation(&self) -> NegaCyclicPoly<Zq, Evaluation> {
-        let [psi, _] = &*twiddle(self[0].q());
+        let [psi, _] = &*twiddle(self.q());
         let mut a = self.0.clone();
         nega_cyclic_ntt_in_place(&mut a, psi);
         NegaCyclicPoly::new(a)
@@ -111,7 +128,7 @@ impl NegaCyclicPoly<Zq, Coefficient> {
 
 impl NegaCyclicPoly<Zq, Evaluation> {
     pub fn to_coefficient(&self) -> NegaCyclicPoly<Zq, Coefficient> {
-        let [_, psi_inv] = &*twiddle(self[0].q());
+        let [_, psi_inv] = &*twiddle(self.q());
         let mut a = self.0.clone();
         nega_cyclic_intt_in_place(&mut a, psi_inv);
         NegaCyclicPoly::new(a)
@@ -189,8 +206,8 @@ impl<'a, T, B: Basis> IntoIterator for &'a mut NegaCyclicPoly<T, B> {
 
 impl MulAssign<&NegaCyclicPoly<Zq, Coefficient>> for NegaCyclicPoly<Zq, Coefficient> {
     fn mul_assign(&mut self, rhs: &NegaCyclicPoly<Zq, Coefficient>) {
-        assert_eq!(self.len(), rhs.len());
-        match twiddle(self[0].q()).get() {
+        assert_eq!(self.n(), rhs.n());
+        match twiddle(self.q()).get() {
             Some([psi, psi_inv]) if self.n() <= psi.len() => {
                 nega_cyclic_ntt_mul_assign(self, rhs, psi, psi_inv)
             }
@@ -205,9 +222,15 @@ impl MulAssign<&NegaCyclicPoly<Zq, Evaluation>> for NegaCyclicPoly<Zq, Evaluatio
     }
 }
 
-impl MulAssign<&AVec<i8>> for NegaCyclicPoly<Zq> {
+impl MulAssign<&AVec<i8>> for NegaCyclicPoly<Zq, Coefficient> {
     fn mul_assign(&mut self, rhs: &AVec<i8>) {
-        *self *= Self::from_iter(rhs.iter().map(|v| Zq::from_i8(self[0].q(), *v)));
+        *self *= Self::from_i8(rhs, self.q());
+    }
+}
+
+impl MulAssign<&AVec<i8>> for NegaCyclicPoly<Zq, Evaluation> {
+    fn mul_assign(&mut self, rhs: &AVec<i8>) {
+        *self *= NegaCyclicPoly::from_i8(rhs, self.q()).to_evaluation();
     }
 }
 
@@ -250,35 +273,7 @@ impl_mul_element!(
     impl<T> Mul<T> for NegaCyclicPoly<T, Coefficient>,
     impl<T> Mul<T> for NegaCyclicPoly<T, Evaluation>,
 );
-
-macro_rules! impl_poly_zq_mul {
-    (@ impl Mul<$rhs:ty> for $lhs:ty; type Output = $out:ty; $lhs_convert:expr) => {
-        impl core::ops::Mul<$rhs> for $lhs {
-            type Output = $out;
-
-            fn mul(self, rhs: $rhs) -> $out {
-                let mut lhs = $lhs_convert(self);
-                lhs.mul_assign(rhs.borrow());
-                lhs
-            }
-        }
-    };
-    ($(impl Mul<$rhs:ty> for $lhs:ty),* $(,)?) => {
-        $(
-            impl core::ops::MulAssign<$rhs> for $lhs {
-                fn mul_assign(&mut self, rhs: $rhs) {
-                    *self *= &rhs;
-                }
-            }
-            impl_poly_zq_mul!(@ impl Mul<$rhs> for $lhs; type Output = $lhs; core::convert::identity);
-            impl_poly_zq_mul!(@ impl Mul<&$rhs> for $lhs; type Output = $lhs; core::convert::identity);
-            impl_poly_zq_mul!(@ impl Mul<$rhs> for &$lhs; type Output = $lhs; <_>::clone);
-            impl_poly_zq_mul!(@ impl Mul<&$rhs> for &$lhs; type Output = $lhs; <_>::clone);
-        )*
-    }
-}
-
-impl_poly_zq_mul!(
+impl_rest_op_by_op_assign_ref!(
     impl Mul<NegaCyclicPoly<Zq, Coefficient>> for NegaCyclicPoly<Zq, Coefficient>,
     impl Mul<NegaCyclicPoly<Zq, Evaluation>> for NegaCyclicPoly<Zq, Evaluation>,
     impl Mul<AVec<i8>> for NegaCyclicPoly<Zq>,
@@ -322,8 +317,8 @@ fn nega_cyclic_schoolbook_mul(
     a: &NegaCyclicPoly<Zq>,
     b: &NegaCyclicPoly<Zq>,
 ) -> NegaCyclicPoly<Zq> {
-    let n = a.len();
-    let mut c = NegaCyclicPoly::from(vec![Zq::from_u64(a[0].q(), 0); n]);
+    let n = a.n();
+    let mut c = NegaCyclicPoly::from(vec![Zq::from_u64(a.q(), 0); n]);
     izip!(0.., a.iter()).for_each(|(i, a)| {
         izip!(0.., b.iter()).for_each(|(j, b)| {
             if i + j < n {
@@ -428,7 +423,7 @@ mod test {
         for log_n in 0..10 {
             let n = 1 << log_n;
             for q in two_adic_primes(45, log_n + 1).take(10) {
-                let [a, b] = &from_fn(|_| NegaCyclicPoly::sample_zq_uniform(n, q, &mut rng));
+                let [a, b] = &from_fn(|_| NegaCyclicPoly::sample_uniform(n, q, &mut rng));
                 assert_eq!(a * b, nega_cyclic_schoolbook_mul(a, b));
             }
         }

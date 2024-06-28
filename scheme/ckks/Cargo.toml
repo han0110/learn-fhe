@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+util = { path = "../../util" }
 astro-float = { workspace = true }
+derive_more = { workspace = true }
 itertools = { workspace = true }
 num-bigint = { workspace = true }
 num-bigint-dig = { workspace = true }

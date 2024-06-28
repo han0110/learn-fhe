@@ -160,7 +160,7 @@ mod test {
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RgswParam::new(RlweParam::new(q, p, log_n), log_b, d);
             let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
-            let m = Rq::sample_zq_uniform(param.n(), p, &mut rng);
+            let m = Rq::sample_uniform(param.n(), p, &mut rng);
             let pt0 = Rgsw::encode(&param, m.clone());
             let pt1 = Rgsw::encode(&param, m.clone());
             let ct0 = Rgsw::sk_encrypt(&param, &sk, pt0, &mut rng);
@@ -177,7 +177,7 @@ mod test {
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RgswParam::new(RlweParam::new(q, p, log_n), log_b, d);
             let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
-            let [m0, m1] = &from_fn(|_| Rq::sample_zq_uniform(param.n(), p, &mut rng));
+            let [m0, m1] = &from_fn(|_| Rq::sample_uniform(param.n(), p, &mut rng));
             let [pt0, pt1] = [m0, m1].map(|m| Rgsw::encode(&param, m.clone()));
             let [ct0, ct1] = [pt0, pt1].map(|pt| Rgsw::pk_encrypt(&param, &pk, pt, &mut rng));
             let (m2, ct2) = (m0 + m1, ct0.clone() + ct1.clone());
@@ -194,7 +194,7 @@ mod test {
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RgswParam::new(RlweParam::new(q, p, log_n), log_b, d);
             let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
-            let [m0, m1] = from_fn(|_| Rq::sample_zq_uniform(param.n(), p, &mut rng));
+            let [m0, m1] = from_fn(|_| Rq::sample_uniform(param.n(), p, &mut rng));
             let ct0 = Rgsw::pk_encrypt(&param, &pk, Rgsw::encode(&param, m0.clone()), &mut rng);
             let ct1 = Rlwe::pk_encrypt(&param, &pk, Rlwe::encode(&param, m1.clone()), &mut rng);
             let ct2 = Rgsw::external_product(&param, ct0, ct1);
@@ -210,7 +210,7 @@ mod test {
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RgswParam::new(RlweParam::new(q, p, log_n), log_b, d);
             let (sk, pk) = Rgsw::key_gen(&param, &mut rng);
-            let [m0, m1] = &from_fn(|_| Rq::sample_zq_uniform(param.n(), p, &mut rng));
+            let [m0, m1] = &from_fn(|_| Rq::sample_uniform(param.n(), p, &mut rng));
             let [pt0, pt1] = [m0, m1].map(|m| Rgsw::encode(&param, m.clone()));
             let [ct0, ct1] = [pt0, pt1].map(|pt| Rgsw::pk_encrypt(&param, &pk, pt, &mut rng));
             let ct2 = Rgsw::internal_product(&param, ct0, ct1);

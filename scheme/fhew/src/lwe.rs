@@ -101,7 +101,7 @@ impl LweCiphertext {
 
 impl Lwe {
     pub fn sk_gen(param: &LweParam, rng: &mut impl RngCore) -> LweSecretKey {
-        let sk = AVec::sample(param.n, &dg(3.2, 6), rng);
+        let sk = AVec::sample(param.n, dg(3.2, 6), rng);
         LweSecretKey(sk)
     }
 
@@ -133,8 +133,8 @@ impl Lwe {
         pt: LwePlaintext,
         rng: &mut impl RngCore,
     ) -> LweCiphertext {
-        let a = AVec::sample_zq_uniform(param.n, param.q(), rng);
-        let e = Zq::sample_i8(param.q(), &dg(3.2, 6), rng);
+        let a = AVec::sample_uniform(param.n, param.q(), rng);
+        let e = Zq::sample_i8(param.q(), dg(3.2, 6), rng);
         let b = a.dot(&sk.0) + pt.0 + e;
         LweCiphertext(a, b)
     }
@@ -175,7 +175,7 @@ impl Lwe {
         pt: LwePlaintext,
         rng: &mut impl RngCore,
     ) -> LweEncryptionShare {
-        let e = Zq::sample_i8(param.q(), &dg(3.2, 6), rng);
+        let e = Zq::sample_i8(param.q(), dg(3.2, 6), rng);
         let b = a.dot(&sk.0) + pt.0 + e;
         LweEncryptionShare(b)
     }
@@ -195,7 +195,7 @@ impl Lwe {
         a: &AVec<Zq>,
         rng: &mut impl RngCore,
     ) -> LweDecryptionShare {
-        let e = Zq::sample_i8(param.q(), &dg(3.2, 6), rng);
+        let e = Zq::sample_i8(param.q(), dg(3.2, 6), rng);
         let share = a.dot(&sk.0) + e;
         LweDecryptionShare(share)
     }

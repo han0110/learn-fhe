@@ -59,6 +59,7 @@ name = "ckks"
 version = "0.1.0"
 dependencies = [
  "astro-float",
+ "derive_more",
  "itertools 0.12.1",
  "num-bigint",
  "num-bigint-dig",
@@ -68,6 +69,7 @@ dependencies = [
  "paste",
  "rand",
  "rand_distr",
+ "util",
 ]
 
 [[package]]
@@ -384,10 +386,12 @@ checksum = "3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b"
 name = "util"
 version = "0.1.0"
 dependencies = [
+ "astro-float",
  "derive_more",
  "itertools 0.12.1",
  "num-bigint",
  "num-bigint-dig",
+ "num-complex",
  "num-integer",
  "num-traits",
  "paste",

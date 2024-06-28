@@ -1,9 +1,9 @@
-use crate::zq::Zq;
+use crate::{izip_eq, zq::Zq};
 use core::{
     borrow::Borrow,
     fmt::{self, Display, Formatter},
     iter::{repeat_with, Sum},
-    ops::{AddAssign, Neg},
+    ops::{AddAssign, Mul, Neg},
     slice,
 };
 use derive_more::{Deref, DerefMut, From, Into};
@@ -15,7 +15,7 @@ use std::vec;
 pub struct AVec<T>(Vec<T>);
 
 impl<T> AVec<T> {
-    pub fn sample(n: usize, dist: &impl Distribution<T>, rng: &mut impl RngCore) -> Self {
+    pub fn sample(n: usize, dist: impl Distribution<T>, rng: &mut impl RngCore) -> Self {
         repeat_with(|| dist.sample(rng)).take(n).collect()
     }
 }
@@ -38,24 +38,22 @@ impl<T: Copy + Neg<Output = T>> AVec<T> {
     }
 }
 
+impl<T> AVec<T>
+where
+    for<'t> &'t T: Mul<&'t T, Output = T>,
+{
+    pub fn ew_mul(&self, rhs: &Self) -> Self {
+        izip_eq!(self, rhs).map(|(lhs, rhs)| lhs * rhs).collect()
+    }
+}
+
 impl AVec<Zq> {
     pub fn zero(n: usize, q: u64) -> Self {
         Self(vec![Zq::from_u64(q, 0); n])
     }
 
-    pub fn sample_zq_uniform(n: usize, q: u64, rng: &mut impl RngCore) -> Self {
+    pub fn sample_uniform(n: usize, q: u64, rng: &mut impl RngCore) -> Self {
         repeat_with(|| Zq::sample_uniform(q, rng)).take(n).collect()
-    }
-
-    pub fn sample_zq_from_i8(
-        n: usize,
-        q: u64,
-        dist: &impl Distribution<i8>,
-        rng: &mut impl RngCore,
-    ) -> Self {
-        repeat_with(|| Zq::sample_i8(q, dist, rng))
-            .take(n)
-            .collect()
     }
 
     pub fn mod_switch(&self, q_prime: u64) -> Self {

@@ -253,12 +253,12 @@ impl Bootstrapping {
         param: &BootstrappingParam,
         rng: &mut impl RngCore,
     ) -> BootstrappingCommonRefStr {
-        let pk = Rq::sample_zq_uniform(param.n(), param.big_q(), rng);
-        let ksk = repeat_with(|| AVec::sample_zq_uniform(param.lwe_s().n(), param.big_q_ks(), rng))
+        let pk = Rq::sample_uniform(param.n(), param.big_q(), rng);
+        let ksk = repeat_with(|| AVec::sample_uniform(param.lwe_s().n(), param.big_q_ks(), rng))
             .take(param.n() * param.lwe_s().decomposor().d())
             .collect();
         let ak = repeat_with(|| {
-            repeat_with(|| Rq::sample_zq_uniform(param.n(), param.big_q(), rng))
+            repeat_with(|| Rq::sample_uniform(param.n(), param.big_q(), rng))
                 .take(param.rlwe().decomposor().d())
                 .collect()
         })
