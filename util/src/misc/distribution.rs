@@ -1,5 +1,5 @@
 use core::f64::consts::SQRT_2;
-use rand_distr::{Distribution, Standard, WeightedIndex};
+use rand::distributions::{Distribution, Standard, WeightedIndex};
 
 pub fn zo(rho: f64) -> impl Distribution<i8> {
     assert!(rho <= 1.0);

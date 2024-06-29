@@ -1,8 +1,10 @@
 use derive_more::{Add, Sub};
 use itertools::{chain, izip, Itertools};
-use num_bigint::{BigInt, BigUint};
 use rand::RngCore;
-use util::{bit_reverse, dg, powers, two_adic_primes, zo, AVec, BigFloat, Complex, CrtRq, Zq};
+use util::{
+    bit_reverse, dg, powers, two_adic_primes, zo, AVec, BigFloat, BigInt, BigUint, Complex, CrtRq,
+    Zq,
+};
 
 #[derive(Clone, Debug)]
 pub struct Ckks;
@@ -302,8 +304,7 @@ mod test {
     use crate::ckks::{special_fft, special_ifft, Ckks, CkksCleartext};
     use core::array::from_fn;
     use itertools::izip;
-    use rand::{rngs::StdRng, SeedableRng};
-    use rand_distr::Standard;
+    use rand::{distributions::Standard, rngs::StdRng, SeedableRng};
     use util::{assert_eq_complex, horner, vec_with, AVec, Complex};
 
     #[test]

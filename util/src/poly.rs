@@ -17,8 +17,7 @@ use core::{
 use derive_more::{Deref, DerefMut};
 use itertools::izip;
 use num_bigint::BigInt;
-use rand::RngCore;
-use rand_distr::Distribution;
+use rand::{distributions::Distribution, RngCore};
 use std::vec;
 
 pub mod crt;

@@ -7,8 +7,10 @@ use core::{
 use derive_more::{Display, Neg};
 use num_bigint::BigInt;
 use num_traits::{Num, One, Zero};
-use rand::Rng;
-use rand_distr::{Distribution, Standard, Uniform};
+use rand::{
+    distributions::{Distribution, Standard, Uniform},
+    Rng,
+};
 
 pub type Complex<T = BigFloat> = num_complex::Complex<T>;
 
@@ -294,7 +296,7 @@ macro_rules! assert_eq_float {
         let (lhs, rhs) = ($lhs, $rhs);
         let diff = (lhs - rhs).abs();
         assert!(
-            diff < (<$crate::BigFloat as num_traits::One>::one() >> $precision),
+            diff < ($crate::BigFloat::from(1) >> $precision),
             concat!(
                 "assertion `left",
                 $(".", $field,)?

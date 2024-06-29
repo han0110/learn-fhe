@@ -6,8 +6,11 @@ use core::{
 };
 use itertools::izip;
 use num_traits::{WrappingAdd, WrappingMul, WrappingNeg, WrappingShl, WrappingShr, WrappingSub};
-use rand::{Rng, RngCore};
-use rand_distr::{Distribution, Normal, Standard};
+use rand::{
+    distributions::{Distribution, Standard},
+    Rng, RngCore,
+};
+use rand_distr::Normal;
 use std::vec::IntoIter;
 
 pub type W64 = Wrapping<u64>;

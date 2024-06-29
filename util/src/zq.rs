@@ -11,8 +11,10 @@ use num_bigint::{BigInt, BigUint, ToBigUint};
 use num_bigint_dig::prime::probably_prime;
 use num_integer::Integer;
 use num_traits::ToPrimitive;
-use rand::RngCore;
-use rand_distr::{Distribution, Uniform};
+use rand::{
+    distributions::{Distribution, Uniform},
+    RngCore,
+};
 use std::{
     collections::{hash_map::Entry, HashMap},
     sync::{Mutex, MutexGuard, OnceLock},

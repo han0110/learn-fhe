@@ -9,8 +9,7 @@ use core::{borrow::Borrow, ops::MulAssign};
 use itertools::{chain, Itertools};
 use num_bigint::{BigInt, BigUint, ToBigInt};
 use num_traits::ToPrimitive;
-use rand::RngCore;
-use rand_distr::Distribution;
+use rand::{distributions::Distribution, RngCore};
 use std::collections::HashSet;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -12,5 +12,6 @@ pub use misc::{
     distribution::{dg, zo},
     horner, powers, Dot,
 };
+pub use num_bigint::{BigInt, BigUint};
 pub use poly::{crt::CrtRq, NegaCyclicPoly, Rq, X};
 pub use zq::{two_adic_primes, Zq};

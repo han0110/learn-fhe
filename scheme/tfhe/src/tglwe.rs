@@ -6,8 +6,7 @@ use crate::{
 };
 use core::{iter::repeat_with, num::Wrapping};
 use itertools::{chain, Itertools};
-use rand::RngCore;
-use rand_distr::Distribution;
+use rand::{distributions::Distribution, RngCore};
 
 pub struct Tglwe;
 

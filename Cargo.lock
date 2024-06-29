@@ -58,17 +58,9 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 name = "ckks"
 version = "0.1.0"
 dependencies = [
- "astro-float",
  "derive_more",
  "itertools 0.12.1",
- "num-bigint",
- "num-bigint-dig",
- "num-complex",
- "num-integer",
- "num-traits",
- "paste",
  "rand",
- "rand_distr",
  "util",
 ]
 
@@ -162,9 +154,9 @@ checksum = "4ec2a862134d2a7d32d7983ddcdd1c4923530833c9f2ea1a44fc5fa473989058"
 
 [[package]]
 name = "num-bigint"
-version = "0.4.5"
+version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c165a9ab64cf766f73521c0dd2cfdff64f488b8f0b3e621face3462d3db536d7"
+checksum = "a5e44f723f1133c9deac646763579fdb3ac745e418f2a7af9cd0c431da1f20b9"
 dependencies = [
  "num-integer",
  "num-traits",
@@ -396,7 +388,6 @@ dependencies = [
  "num-traits",
  "paste",
  "rand",
- "rand_distr",
 ]
 
 [[package]]

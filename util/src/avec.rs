@@ -7,8 +7,7 @@ use core::{
     slice,
 };
 use derive_more::{Deref, DerefMut, From, Into};
-use rand::RngCore;
-use rand_distr::Distribution;
+use rand::{distributions::Distribution, RngCore};
 use std::vec;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deref, DerefMut, From, Into)]

@@ -1,7 +1,6 @@
 use crate::util::{uniform_binaries, AdditiveVec, Dot, Round, TorusNormal, W64};
 use core::{iter::repeat_with, num::Wrapping};
-use rand::RngCore;
-use rand_distr::Distribution;
+use rand::{distributions::Distribution, RngCore};
 
 pub struct Tlwe;
 
