@@ -228,7 +228,7 @@ impl Ckks {
             ct0.b() * ct1.a() + ct0.a() * ct1.b(),
             ct0.a() * ct1.a(),
         ];
-        let d2 = &d2.extend(param.ps());
+        let d2 = &d2.extend_bases(param.ps());
         let c0 = (d0 + (d2 * ek.mul.b()).rescale_k(param.big_l())).rescale();
         let c1 = (d1 + (d2 * ek.mul.a()).rescale_k(param.big_l())).rescale();
         CkksCiphertext(c0, c1)
@@ -369,7 +369,7 @@ mod test {
             let m = ms.into_iter().reduce(mul_m).unwrap();
             let ct = cts.into_iter().reduce(mul_ct).unwrap();
             izip!(m, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct)).0)
-                .for_each(|(lhs, rhs)| assert_eq_complex!(lhs, rhs, 30));
+                .for_each(|(lhs, rhs)| assert_eq_complex!(lhs, rhs, 32));
         }
     }
 }

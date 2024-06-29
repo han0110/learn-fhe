@@ -19,7 +19,7 @@ pub struct Fhew;
 impl Fhew {
     fn decode(param: &BootstrappingParam, pt: LwePlaintext) -> bool {
         assert_eq!(param.p(), 4);
-        let m = u64::from(Lwe::decode(param.lwe_z(), pt));
+        let m = Lwe::decode(param.lwe_z(), pt).to_u64();
         assert!(m == 0 || m == 1);
         m == 1
     }

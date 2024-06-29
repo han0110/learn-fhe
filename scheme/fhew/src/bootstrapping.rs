@@ -217,7 +217,7 @@ fn i_minus_i_plus(n: usize, a: &AVec<Zq>) -> (Vec<Vec<usize>>, Vec<Vec<usize>>) 
             match (log_map_g_minus.get(ai), log_map_g_plus.get(ai)) {
                 (Some(l), None) => i_minus[*l].push(i),
                 (None, Some(l)) => i_plus[*l].push(i),
-                _ if u64::from(ai) == 0 => {}
+                _ if ai.to_u64() == 0 => {}
                 _ => unreachable!(),
             }
             (i_minus, i_plus)

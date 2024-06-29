@@ -68,7 +68,7 @@ impl CrtRq<Coefficient> {
         &self * &self
     }
 
-    pub fn extend(mut self, ps: &[u64]) -> Self {
+    pub fn extend_bases(mut self, ps: &[u64]) -> Self {
         assert!(chain![self.qs(), ps.iter().copied()].all_unique());
         let helper = CrtHelper::new(&self.qs()).with_ps(ps);
         let mut rps = ps.iter().map(|p| Rq::zero(self.n(), *p)).collect_vec();
@@ -77,22 +77,53 @@ impl CrtRq<Coefficient> {
         self
     }
 
-    pub fn rescale(mut self) -> Self {
-        let ql = self.qs().pop().unwrap();
-        let rql = self.0.pop().unwrap();
-        let rql = rql.into_iter().map(|v| u64::from(v + ql / 2)).collect_vec();
-        self.0.iter_mut().for_each(|rqi| {
-            let ql_inv = Zq::from_u64(rqi.q(), ql).inv().unwrap();
-            izip!(rqi, &rql).for_each(|(vi, vl)| *vi = ql_inv * (*vi + ql / 2 - vl));
-        });
-        self
+    pub fn switch_bases(self, ps: &[u64]) -> Self {
+        let n = self.qs().len();
+        self.extend_bases(ps).split_off(n)
+    }
+
+    pub fn rescale(self) -> Self {
+        self.rescale_k(1)
     }
 
     pub fn rescale_k(mut self, k: usize) -> Self {
-        for _ in 0..k {
-            self = self.rescale();
+        assert!(k > 0);
+        let mut qs = self.qs();
+        let ps = qs.split_off(self.0.len() - k);
+        let p = ps.iter().product();
+        self.round(&p);
+        if k == 1 {
+            let rp = self.0.pop().unwrap();
+            self.each_mut(|rqi| izip!(rqi, &rp).for_each(|(vq, vp)| *vq -= vp.to_u64()));
+        } else {
+            let rps = self.split_off(qs.len());
+            self -= rps.switch_bases(&qs);
         }
+        self.div(&p);
         self
+    }
+
+    fn round(&mut self, p: &BigUint) {
+        let p_half = p >> 1;
+        self.each_mut(|rqi| {
+            let p_half = Zq::from_biguint(rqi.q(), &p_half);
+            rqi.iter_mut().for_each(|v| *v += p_half)
+        });
+    }
+
+    fn div(&mut self, p: &BigUint) {
+        self.each_mut(|rqi| {
+            let p_inv = Zq::from_biguint(rqi.q(), p).inv().unwrap();
+            *rqi *= p_inv;
+        });
+    }
+
+    fn each_mut(&mut self, f: impl FnMut(&mut Rq)) {
+        self.0.iter_mut().for_each(f)
+    }
+
+    fn split_off(&mut self, at: usize) -> Self {
+        Self(self.0.split_off(at).into())
     }
 }
 
@@ -261,7 +292,7 @@ impl CrtHelper {
 
     fn rems_to_bigint(&self, rems: impl IntoIterator<Item = Zq>) -> BigInt {
         let v = izip!(&self.q_hats, &self.q_hats_inv_qs, rems)
-            .map(|(qi_hat, qi_hat_inv, rem)| qi_hat * qi_hat_inv * u64::from(rem))
+            .map(|(qi_hat, qi_hat_inv, rem)| qi_hat * qi_hat_inv * rem.to_u64())
             .sum::<BigUint>();
         v.centering_rem(&self.q)
     }
@@ -291,7 +322,7 @@ impl CrtHelper {
         vps: impl IntoIterator<Item = &'t mut Zq>,
     ) {
         let vs = izip!(vqs, &self.q_hats_inv_qs)
-            .map(|(vqi, qi_hats_inv)| u64::from(vqi * qi_hats_inv))
+            .map(|(vqi, qi_hats_inv)| (vqi * qi_hats_inv).to_u64())
             .collect_vec();
         let u = izip!(&self.q_fracs, &vs)
             .map(|(qi_frac, vi)| qi_frac * *vi as f64)
@@ -335,7 +366,10 @@ mod test {
             let qs = primes.by_ref().take(8).collect_vec();
             let ps = primes.by_ref().take(8).collect_vec();
             let poly = CrtRq::sample_uniform(1 << log_n, &qs, rng);
-            assert_eq!(poly.clone().into_bigint(), poly.extend(&ps).into_bigint());
+            assert_eq!(
+                poly.clone().into_bigint(),
+                poly.extend_bases(&ps).into_bigint()
+            );
         }
     }
 }

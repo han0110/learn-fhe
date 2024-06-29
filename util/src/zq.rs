@@ -2,10 +2,10 @@ use crate::bit_reverse;
 use core::{
     borrow::Borrow,
     cmp::Ordering,
-    fmt::{self, Display, Formatter},
     iter::{successors, Product, Sum},
     ops::{AddAssign, Deref, MulAssign, Neg, SubAssign},
 };
+use derive_more::Display;
 use itertools::Itertools;
 use num_bigint::{BigInt, BigUint, ToBigUint};
 use num_bigint_dig::prime::probably_prime;
@@ -18,7 +18,8 @@ use std::{
     sync::{Mutex, MutexGuard, OnceLock},
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Display)]
+#[display(fmt = "{}", v)]
 pub struct Zq {
     q: u64,
     v: u64,
@@ -63,7 +64,11 @@ impl Zq {
         Self::from_u64(q, v as u64)
     }
 
-    pub(crate) fn into_center_signed(self) -> i64 {
+    pub fn to_u64(self) -> u64 {
+        self.v
+    }
+
+    pub fn to_i64(self) -> i64 {
         if self.v < self.q >> 1 {
             self.v as i64
         } else {
@@ -71,7 +76,11 @@ impl Zq {
         }
     }
 
-    pub(crate) fn into_center_unsigned(self) -> u64 {
+    pub fn to_f64(self) -> f64 {
+        self.to_i64() as f64
+    }
+
+    pub(crate) fn to_center_u64(self) -> u64 {
         if self.v < self.q >> 1 {
             self.v
         } else {
@@ -127,30 +136,6 @@ impl Zq {
     }
 }
 
-impl From<&Zq> for u64 {
-    fn from(value: &Zq) -> Self {
-        value.v
-    }
-}
-
-impl From<&Zq> for i64 {
-    fn from(value: &Zq) -> Self {
-        value.into_center_signed()
-    }
-}
-
-impl From<Zq> for f64 {
-    fn from(value: Zq) -> Self {
-        value.into_center_signed() as f64
-    }
-}
-
-impl From<&Zq> for f64 {
-    fn from(value: &Zq) -> Self {
-        value.into_center_signed() as f64
-    }
-}
-
 impl Ord for Zq {
     fn cmp(&self, other: &Self) -> Ordering {
         assert_eq!(self.q, other.q);
@@ -161,12 +146,6 @@ impl Ord for Zq {
 impl PartialOrd for Zq {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
-    }
-}
-
-impl Display for Zq {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.v)
     }
 }
 
@@ -278,20 +257,30 @@ macro_rules! impl_op_with_primitive {
             $(
                 paste::paste! {
                     impl Zq {
+                        #[inline(always)]
                         pub fn [<from_ $p1>](q: u64, v: $p1) -> Self {
                             Self::[<from_ $p2>](q, v as $p2)
                         }
-                    }
-                }
-                impl From<&Zq> for $p1 {
-                    fn from(value: &Zq) -> $p1 {
-                        <$p2>::from(value).try_into().unwrap()
+
+                        #[inline(always)]
+                        pub fn [<to_ $p1>](self) -> $p1 {
+                            self.[<to_ $p2>]() as _
+                        }
                     }
                 }
             )?
-            impl From<Zq> for $p1 {
-                fn from(value: Zq) -> $p1 {
-                    (&value).into()
+            paste::paste! {
+                impl From<&Zq> for $p1 {
+                    #[inline(always)]
+                    fn from(value: &Zq) -> $p1 {
+                        value.[<to_ $p1>]()
+                    }
+                }
+                impl From<Zq> for $p1 {
+                    #[inline(always)]
+                    fn from(value: Zq) -> $p1 {
+                        value.[<to_ $p1>]()
+                    }
                 }
             }
             impl_op_with_primitive!(
@@ -314,6 +303,7 @@ impl_rest_op_by_op_assign_ref!(
     impl Mul<Zq> for Zq,
 );
 impl_op_with_primitive!(
+    f64,
     u64,
     i64,
     u32 as u64,

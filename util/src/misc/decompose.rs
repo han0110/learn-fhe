@@ -51,12 +51,12 @@ pub trait Decomposable: Sized {
 impl Decomposable for Zq {
     fn rounding_shr(&self, bits: usize) -> Self {
         let rounded = self + ((1u64 << bits) >> 1);
-        Zq::from_u64(self.q(), u64::from(rounded) >> bits)
+        Zq::from_u64(self.q(), rounded.to_u64() >> bits)
     }
 
     fn decompose(self, log_b: usize) -> impl Iterator<Item = Self> {
         let (b_by_2, mask, neg_b) = (1 << (log_b - 1), (1 << log_b) - 1, self.q() - (1 << log_b));
-        let mut v = self.into_center_unsigned();
+        let mut v = self.to_center_u64();
         repeat_with(move || {
             let limb = v & mask;
             let carry = (limb + (v & 1) > b_by_2) as u64;
