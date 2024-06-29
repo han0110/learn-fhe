@@ -201,8 +201,8 @@ impl Ckks {
         rng: &mut impl RngCore,
     ) -> CkksCiphertext {
         let u = &CrtRq::sample_i8(param.n(), param.qs(), zo(0.5), rng);
-        let e0 = &CrtRq::sample_i8(param.n(), param.qs(), dg(3.2, 6), &mut *rng);
-        let e1 = &CrtRq::sample_i8(param.n(), param.qs(), dg(3.2, 6), &mut *rng);
+        let e0 = &CrtRq::sample_i8(param.n(), param.qs(), dg(3.2, 6), rng);
+        let e1 = &CrtRq::sample_i8(param.n(), param.qs(), dg(3.2, 6), rng);
         let c0 = pk0 * u + e0 + pt;
         let c1 = pk1 * u + e1;
         CkksCiphertext(c0, c1)

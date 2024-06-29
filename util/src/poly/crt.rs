@@ -6,7 +6,7 @@ use crate::{
     AVec, Dot, Rq, Zq,
 };
 use core::{borrow::Borrow, ops::MulAssign};
-use itertools::{chain, izip, Itertools};
+use itertools::{chain, Itertools};
 use num_bigint::{BigInt, BigUint, ToBigInt};
 use num_traits::ToPrimitive;
 use rand::RngCore;
@@ -59,9 +59,8 @@ impl CrtRq<Coefficient> {
     }
 
     pub fn into_bigint(self) -> Vec<BigInt> {
-        let helper = CrtHelper::new(&self.qs());
-        let to_biging = |rems| helper.rems_to_bigint(rems);
-        zipstar!(self.0).map(to_biging).collect()
+        let crt = Crt::new(&self.qs());
+        zipstar!(self.0).map(|rems| crt.reconstruct(rems)).collect()
     }
 
     pub fn square(self) -> Self {
@@ -70,14 +69,16 @@ impl CrtRq<Coefficient> {
 
     pub fn extend_bases(mut self, ps: &[u64]) -> Self {
         assert!(chain![self.qs(), ps.iter().copied()].all_unique());
-        let helper = CrtHelper::new(&self.qs()).with_ps(ps);
+        let crt = Crt::new(&self.qs()).with_ps(ps);
         let mut rps = ps.iter().map(|p| Rq::zero(self.n(), *p)).collect_vec();
-        izip!(zipstar!(&self.0), zipstar!(&mut rps)).for_each(|(vqs, vps)| helper.extend(vqs, vps));
+        izip_eq!(zipstar!(&self.0), zipstar!(&mut rps))
+            .for_each(|(vqs, vps)| crt.extend_bases(vqs, vps));
         self.0.extend(rps);
         self
     }
 
     pub fn switch_bases(self, ps: &[u64]) -> Self {
+        assert!(chain![self.qs(), ps.iter().copied()].all_unique());
         let n = self.qs().len();
         self.extend_bases(ps).split_off(n)
     }
@@ -94,7 +95,7 @@ impl CrtRq<Coefficient> {
         self.round(&p);
         if k == 1 {
             let rp = self.0.pop().unwrap();
-            self.each_mut(|rqi| izip!(rqi, &rp).for_each(|(vq, vp)| *vq -= vp.to_u64()));
+            self.each_mut(|rqi| izip_eq!(rqi, &rp).for_each(|(vq, vp)| *vq -= vp.to_u64()));
         } else {
             let rps = self.split_off(qs.len());
             self -= rps.switch_bases(&qs);
@@ -263,7 +264,7 @@ impl_rest_op_by_op_assign_ref!(
     impl Mul<BigUint> for CrtRq<Evaluation>,
 );
 
-struct CrtHelper {
+struct Crt {
     q: BigUint,
     q_hats: Vec<BigUint>,
     q_hats_inv_qs: Vec<u64>,
@@ -272,11 +273,11 @@ struct CrtHelper {
     uq_ps: Vec<Vec<Zq>>,
 }
 
-impl CrtHelper {
+impl Crt {
     fn new(qs: &[u64]) -> Self {
         let q = qs.iter().product::<BigUint>();
         let q_hats = qs.iter().map(|qi| &q / qi).collect_vec();
-        let q_hats_inv_qs = izip!(qs, &q_hats)
+        let q_hats_inv_qs = izip_eq!(qs, &q_hats)
             .map(|(qi, qi_hat)| qi_hat.modinv(&(*qi).into()).unwrap().to_u64().unwrap())
             .collect_vec();
         let q_fracs = qs.iter().map(|qi| 1.0 / *qi as f64).collect_vec();
@@ -288,13 +289,6 @@ impl CrtHelper {
             q_hats_ps: Vec::new(),
             uq_ps: Vec::new(),
         }
-    }
-
-    fn rems_to_bigint(&self, rems: impl IntoIterator<Item = Zq>) -> BigInt {
-        let v = izip!(&self.q_hats, &self.q_hats_inv_qs, rems)
-            .map(|(qi_hat, qi_hat_inv, rem)| qi_hat * qi_hat_inv * rem.to_u64())
-            .sum::<BigUint>();
-        v.centering_rem(&self.q)
     }
 
     fn with_ps(mut self, ps: &[u64]) -> Self {
@@ -316,19 +310,26 @@ impl CrtHelper {
         self
     }
 
-    fn extend<'t>(
+    fn reconstruct(&self, rems: impl IntoIterator<Item = Zq>) -> BigInt {
+        let v = izip_eq!(&self.q_hats, &self.q_hats_inv_qs, rems)
+            .map(|(qi_hat, qi_hat_inv, rem)| qi_hat * qi_hat_inv * rem.to_u64())
+            .sum::<BigUint>();
+        v.centering_rem(&self.q)
+    }
+
+    fn extend_bases<'t>(
         &self,
         vqs: impl IntoIterator<Item = &'t Zq>,
         vps: impl IntoIterator<Item = &'t mut Zq>,
     ) {
-        let vs = izip!(vqs, &self.q_hats_inv_qs)
+        let vs = izip_eq!(vqs, &self.q_hats_inv_qs)
             .map(|(vqi, qi_hats_inv)| (vqi * qi_hats_inv).to_u64())
             .collect_vec();
-        let u = izip!(&self.q_fracs, &vs)
+        let u = izip_eq!(&self.q_fracs, &vs)
             .map(|(qi_frac, vi)| qi_frac * *vi as f64)
             .sum::<f64>()
             .round() as usize;
-        izip!(vps, &self.q_hats_ps, &self.uq_ps)
+        izip_eq!(vps, &self.q_hats_ps, &self.uq_ps)
             .for_each(|(vpi, q_hats_pi, uq_pi)| *vpi = q_hats_pi.dot(&vs) - uq_pi[u]);
     }
 }
@@ -359,7 +360,7 @@ mod test {
     use rand::{rngs::StdRng, SeedableRng};
 
     #[test]
-    fn extend() {
+    fn extend_bases() {
         let rng = &mut StdRng::from_entropy();
         for log_n in 0..10 {
             let mut primes = two_adic_primes(55, log_n + 1);
