@@ -62,6 +62,11 @@ impl CrtRq<Coefficient> {
         zipstar!(self.0).map(|rems| crt.reconstruct(rems)).collect()
     }
 
+    pub fn automorphism(mut self, t: i64) -> Self {
+        self.each_mut(|rqi| *rqi = rqi.automorphism(t));
+        self
+    }
+
     pub fn square(self) -> Self {
         &self * &self
     }

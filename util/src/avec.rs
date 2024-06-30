@@ -1,4 +1,4 @@
-use crate::{izip_eq, zq::Zq};
+use crate::{float::Complex, izip_eq, zq::Zq};
 use core::{
     borrow::Borrow,
     fmt::{self, Display, Formatter},
@@ -61,6 +61,12 @@ impl AVec<Zq> {
 
     pub fn mod_switch_odd(&self, q_prime: u64) -> Self {
         self.iter().map(|v| v.mod_switch_odd(q_prime)).collect()
+    }
+}
+
+impl AVec<Complex> {
+    pub fn conjugate(&self) -> Self {
+        self.iter().map(Complex::conj).collect()
     }
 }
 

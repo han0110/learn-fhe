@@ -73,6 +73,10 @@ impl CkksSecretKey {
     fn as_avec(&self) -> &AVec<i8> {
         &self.0
     }
+
+    fn automorphism(&self, t: i64) -> Self {
+        CkksSecretKey(self.as_avec().automorphism(t))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -91,11 +95,16 @@ impl CkksPublicKey {
 #[derive(Clone, Debug)]
 pub struct CkksEvaluationKey {
     mul: CkksKeySwitchingKey,
+    conj: CkksKeySwitchingKey,
 }
 
 impl CkksEvaluationKey {
     pub fn mul(&self) -> &CkksKeySwitchingKey {
         &self.mul
+    }
+
+    pub fn conj(&self) -> &CkksKeySwitchingKey {
+        &self.conj
     }
 }
 
@@ -134,16 +143,12 @@ impl CkksCiphertext {
         CkksCiphertext(CrtRq::zero(a.n(), &a.qs()), a)
     }
 
-    fn extend_bases(self, ps: &[u64]) -> CkksCiphertext {
-        CkksCiphertext(self.0.extend_bases(ps), self.1.extend_bases(ps))
-    }
-
     fn rescale(self) -> CkksCiphertext {
         CkksCiphertext(self.0.rescale(), self.1.rescale())
     }
 
-    fn rescale_k(self, k: usize) -> CkksCiphertext {
-        CkksCiphertext(self.0.rescale_k(k), self.1.rescale_k(k))
+    fn automorphism(self, t: i64) -> CkksCiphertext {
+        CkksCiphertext(self.0.automorphism(t), self.1.automorphism(t))
     }
 }
 
@@ -194,10 +199,14 @@ impl Ckks {
         };
         let ek = {
             let mul = {
-                let s_prime = CrtRq::from_i8(sk.as_avec(), &param.qps()).square();
-                Self::ksk_gen(param, &sk, s_prime, rng)
+                let sk_square = CrtRq::from_i8(sk.as_avec(), &param.qps()).square();
+                Self::ksk_gen(param, &sk, sk_square, rng)
             };
-            CkksEvaluationKey { mul }
+            let conj = {
+                let sk_conj = CrtRq::from_i8(sk.automorphism(-1).as_avec(), &param.qps());
+                Self::ksk_gen(param, &sk, sk_conj, rng)
+            };
+            CkksEvaluationKey { mul, conj }
         };
         (sk, pk, ek)
     }
@@ -295,15 +304,24 @@ impl Ckks {
         (CkksCiphertext(d0, d1) + ct_ks).rescale()
     }
 
+    pub fn conjugate(
+        param: &CkksParam,
+        ek: &CkksEvaluationKey,
+        ct: CkksCiphertext,
+    ) -> CkksCiphertext {
+        let ct_conj = ct.automorphism(-1);
+        Ckks::key_switch(param, ek.conj(), ct_conj)
+    }
+
     pub fn key_switch(
         param: &CkksParam,
         ksk: &CkksKeySwitchingKey,
-        ct: CkksCiphertext,
+        CkksCiphertext(ct_b, ct_a): CkksCiphertext,
     ) -> CkksCiphertext {
-        let ct = ct.extend_bases(param.ps());
-        let b = ksk.b() * ct.a() + ct.b();
-        let a = ksk.a() * ct.a();
-        CkksCiphertext(b, a).rescale_k(param.big_l())
+        let ct_a = &ct_a.extend_bases(param.ps());
+        let b = (ksk.b() * ct_a).rescale_k(param.big_l()) + ct_b;
+        let a = (ksk.a() * ct_a).rescale_k(param.big_l());
+        CkksCiphertext(b, a)
     }
 }
 
@@ -432,6 +450,23 @@ mod test {
             let ct = cts.into_iter().reduce(mul_ct).unwrap();
             izip!(m, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct)).0)
                 .for_each(|(lhs, rhs)| assert_eq_complex!(lhs, rhs, 32));
+        }
+    }
+
+    #[test]
+    fn conjugate() {
+        let rng = &mut StdRng::from_entropy();
+        let (log_qi, big_l) = (55, 8);
+        for log_n in 1..10 {
+            let param = Ckks::param_gen(log_n, log_qi, big_l);
+            let (sk, pk, ek) = Ckks::key_gen(&param, rng);
+            let m0 = AVec::sample(param.l(), Standard, rng);
+            let m1 = m0.conjugate();
+            let pt0 = Ckks::encode(&param, CkksCleartext(m0));
+            let ct0 = Ckks::pk_encrypt(&param, &pk, pt0, rng);
+            let ct1 = Ckks::conjugate(&param, &ek, ct0);
+            izip!(m1, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct1)).0)
+                .for_each(|(lhs, rhs)| assert_eq_complex!(lhs, rhs, 40));
         }
     }
 }
