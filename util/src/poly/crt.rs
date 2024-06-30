@@ -104,9 +104,8 @@ impl CrtRq<Coefficient> {
     }
 
     fn round(&mut self, p: &BigUint) {
-        let p_half = p >> 1;
         self.each_mut(|rqi| {
-            let p_half = Zq::from_biguint(rqi.q(), &p_half);
+            let p_half = Zq::from_biguint(rqi.q(), &(p >> 1));
             rqi.iter_mut().for_each(|v| *v += p_half)
         });
     }

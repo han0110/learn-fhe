@@ -19,7 +19,7 @@ impl<T> AVec<T> {
     }
 }
 
-impl<T: Copy + Neg<Output = T>> AVec<T> {
+impl<T: Clone + Neg<Output = T>> AVec<T> {
     pub fn automorphism(&self, t: i64) -> Self {
         assert!(self.len().is_power_of_two());
         let mut v = self.clone();
@@ -28,9 +28,9 @@ impl<T: Copy + Neg<Output = T>> AVec<T> {
         (0..n).for_each(|i| {
             let it = (i * t) % (2 * n);
             if it < n {
-                v[it] = self[i]
+                v[it] = self[i].clone();
             } else {
-                v[it - n] = -self[i]
+                v[it - n] = -self[i].clone();
             }
         });
         v
