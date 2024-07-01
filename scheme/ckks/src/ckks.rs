@@ -138,10 +138,6 @@ impl CkksCiphertext {
         &self.0
     }
 
-    fn from_a(a: CrtRq) -> Self {
-        CkksCiphertext(CrtRq::zero(a.n(), &a.qs()), a)
-    }
-
     fn rescale(self) -> CkksCiphertext {
         CkksCiphertext(self.0.rescale(), self.1.rescale())
     }
@@ -313,8 +309,12 @@ impl Ckks {
             ct0.b() * ct1.a() + ct0.a() * ct1.b(),
             ct0.a() * ct1.a(),
         ];
-        let ct_ks = Ckks::key_switch(param, rlk, CkksCiphertext::from_a(d2));
-        (CkksCiphertext(d0, d1) + ct_ks).rescale()
+        (CkksCiphertext(d0, d1) + Ckks::relinearize(param, rlk, d2)).rescale()
+    }
+
+    fn relinearize(param: &CkksParam, rlk: &CkksRelinKey, d2: CrtRq) -> CkksCiphertext {
+        let ct_quad = CkksCiphertext(CrtRq::zero(d2.n(), &d2.qs()), d2);
+        Ckks::key_switch(param, rlk, ct_quad)
     }
 
     pub fn conjugate(param: &CkksParam, cjk: &CkksConjKey, ct: CkksCiphertext) -> CkksCiphertext {
