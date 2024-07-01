@@ -94,8 +94,8 @@ impl Zq {
         Zq::from_u64(q, Uniform::new(0, q).sample(rng))
     }
 
-    pub fn sample_i8(q: u64, dist: impl Distribution<i8>, rng: &mut impl RngCore) -> Self {
-        Zq::from_i8(q, dist.sample(rng))
+    pub fn sample_i64(q: u64, dist: impl Distribution<i64>, rng: &mut impl RngCore) -> Self {
+        Zq::from_i64(q, dist.sample(rng))
     }
 
     pub fn generator(q: u64) -> Self {
@@ -115,7 +115,7 @@ impl Zq {
     }
 
     pub fn powers(self) -> impl Iterator<Item = Self> {
-        successors(Some(Zq::from_i8(self.q, 1)), move |v| Some(v * self))
+        successors(Some(Zq::from_u64(self.q, 1)), move |v| Some(v * self))
     }
 
     pub fn inv(self) -> Option<Self> {

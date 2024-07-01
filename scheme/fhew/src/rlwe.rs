@@ -28,7 +28,7 @@ impl RlweParam {
 pub struct RlweSecretKey(LweSecretKey);
 
 impl RlweSecretKey {
-    fn as_avec(&self) -> &AVec<i8> {
+    fn as_avec(&self) -> &AVec<i64> {
         &self.0 .0
     }
 
@@ -160,7 +160,7 @@ impl Rlwe {
         rng: &mut impl RngCore,
     ) -> RlweCiphertext {
         let a = Rq::sample_uniform(param.n(), param.q(), rng);
-        let e = Rq::sample_i8(param.n(), param.q(), dg(3.2, 6), rng);
+        let e = Rq::sample_i64(param.n(), param.q(), dg(3.2, 6), rng);
         let b = &a * sk.as_avec() + e + pt.0;
         RlweCiphertext(a, b)
     }
@@ -171,9 +171,9 @@ impl Rlwe {
         pt: RlwePlaintext,
         rng: &mut impl RngCore,
     ) -> RlweCiphertext {
-        let u = &Rq::sample_i8(param.n(), param.q(), zo(0.5), rng);
-        let e0 = Rq::sample_i8(param.n(), param.q(), dg(3.2, 6), rng);
-        let e1 = Rq::sample_i8(param.n(), param.q(), dg(3.2, 6), rng);
+        let u = &Rq::sample_i64(param.n(), param.q(), zo(0.5), rng);
+        let e0 = Rq::sample_i64(param.n(), param.q(), dg(3.2, 6), rng);
+        let e1 = Rq::sample_i64(param.n(), param.q(), dg(3.2, 6), rng);
         let a = pk.a() * u + e0;
         let b = pk.b() * u + e1 + pt.0;
         RlweCiphertext(a, b)
@@ -254,7 +254,7 @@ impl Rlwe {
         pt: RlwePlaintext,
         rng: &mut impl RngCore,
     ) -> RlweEncryptionShare {
-        let e = Rq::sample_i8(param.n(), param.q(), dg(3.2, 6), rng);
+        let e = Rq::sample_i64(param.n(), param.q(), dg(3.2, 6), rng);
         let b = a * sk.as_avec() + e + pt.0;
         RlweEncryptionShare(b)
     }
@@ -274,7 +274,7 @@ impl Rlwe {
         a: &Rq,
         rng: &mut impl RngCore,
     ) -> RlweDecryptionShare {
-        let e = Rq::sample_i8(param.n(), param.q(), dg(3.2, 6), rng);
+        let e = Rq::sample_i64(param.n(), param.q(), dg(3.2, 6), rng);
         let share = a * sk.as_avec() + e;
         RlweDecryptionShare(share)
     }

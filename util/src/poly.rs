@@ -11,7 +11,7 @@ use core::{
     fmt::{self, Debug, Display, Formatter},
     iter::Sum,
     marker::PhantomData,
-    ops::{AddAssign, BitXor, MulAssign, Neg},
+    ops::{AddAssign, BitXor, Mul, MulAssign, Neg, SubAssign},
     slice,
 };
 use derive_more::{Deref, DerefMut};
@@ -56,6 +56,13 @@ impl<T, B: Basis> NegaCyclicPoly<T, B> {
 
     pub fn sample(n: usize, dist: impl Distribution<T>, rng: &mut impl RngCore) -> Self {
         Self::new(AVec::sample(n, dist, rng))
+    }
+
+    pub fn square(&self) -> Self
+    where
+        for<'t> &'t Self: Mul<&'t Self, Output = Self>,
+    {
+        self * self
     }
 }
 
@@ -104,17 +111,17 @@ impl NegaCyclicPoly<Zq, Coefficient> {
         poly
     }
 
-    pub fn sample_i8(
+    pub fn sample_i64(
         n: usize,
         q: u64,
-        dist: impl Distribution<i8>,
+        dist: impl Distribution<i64>,
         rng: &mut impl RngCore,
     ) -> Self {
-        Self::from_i8(&AVec::sample(n, dist, rng), q)
+        Self::from_i64(&AVec::sample(n, dist, rng), q)
     }
 
-    fn from_i8(v: &[i8], q: u64) -> Self {
-        Self::new(v.iter().map(|v| Zq::from_i8(q, *v)).collect())
+    fn from_i64(v: &[i64], q: u64) -> Self {
+        Self::new(v.iter().map(|v| Zq::from_i64(q, *v)).collect())
     }
 
     pub fn to_evaluation(&self) -> NegaCyclicPoly<Zq, Evaluation> {
@@ -221,15 +228,21 @@ impl MulAssign<&NegaCyclicPoly<Zq, Evaluation>> for NegaCyclicPoly<Zq, Evaluatio
     }
 }
 
-impl MulAssign<&AVec<i8>> for NegaCyclicPoly<Zq, Coefficient> {
-    fn mul_assign(&mut self, rhs: &AVec<i8>) {
-        *self *= Self::from_i8(rhs, self.q());
+impl MulAssign<&AVec<i64>> for NegaCyclicPoly<Zq, Coefficient> {
+    fn mul_assign(&mut self, rhs: &AVec<i64>) {
+        *self *= Self::from_i64(rhs, self.q());
     }
 }
 
-impl MulAssign<&AVec<i8>> for NegaCyclicPoly<Zq, Evaluation> {
-    fn mul_assign(&mut self, rhs: &AVec<i8>) {
-        *self *= NegaCyclicPoly::from_i8(rhs, self.q()).to_evaluation();
+impl MulAssign<&AVec<i64>> for NegaCyclicPoly<Zq, Evaluation> {
+    fn mul_assign(&mut self, rhs: &AVec<i64>) {
+        *self *= NegaCyclicPoly::from_i64(rhs, self.q()).to_evaluation();
+    }
+}
+
+impl MulAssign<&NegaCyclicPoly<i64, Coefficient>> for NegaCyclicPoly<i64, Coefficient> {
+    fn mul_assign(&mut self, rhs: &NegaCyclicPoly<i64, Coefficient>) {
+        *self = nega_cyclic_schoolbook_mul(self, rhs);
     }
 }
 
@@ -275,7 +288,8 @@ impl_mul_element!(
 impl_rest_op_by_op_assign_ref!(
     impl Mul<NegaCyclicPoly<Zq, Coefficient>> for NegaCyclicPoly<Zq, Coefficient>,
     impl Mul<NegaCyclicPoly<Zq, Evaluation>> for NegaCyclicPoly<Zq, Evaluation>,
-    impl Mul<AVec<i8>> for NegaCyclicPoly<Zq>,
+    impl Mul<NegaCyclicPoly<i64, Coefficient>> for NegaCyclicPoly<i64, Coefficient>,
+    impl Mul<AVec<i64>> for NegaCyclicPoly<Zq>,
     impl Mul<Monomial> for NegaCyclicPoly<Zq>,
 );
 
@@ -296,11 +310,11 @@ impl MulAssign<&Monomial> for NegaCyclicPoly<Zq> {
 
 pub struct X;
 
-impl BitXor<&i8> for X {
+impl BitXor<&i64> for X {
     type Output = Monomial;
 
-    fn bitxor(self, rhs: &i8) -> Self::Output {
-        Monomial(*rhs as i64)
+    fn bitxor(self, rhs: &i64) -> Self::Output {
+        Monomial(*rhs)
     }
 }
 
@@ -312,14 +326,15 @@ impl BitXor<Zq> for X {
     }
 }
 
-fn nega_cyclic_schoolbook_mul(
-    a: &NegaCyclicPoly<Zq>,
-    b: &NegaCyclicPoly<Zq>,
-) -> NegaCyclicPoly<Zq> {
+fn nega_cyclic_schoolbook_mul<T>(a: &NegaCyclicPoly<T>, b: &NegaCyclicPoly<T>) -> NegaCyclicPoly<T>
+where
+    T: AddAssign<T> + SubAssign<T>,
+    for<'t> &'t T: Mul<&'t T, Output = T>,
+{
     let n = a.n();
-    let mut c = NegaCyclicPoly::from(vec![Zq::from_u64(a.q(), 0); n]);
+    let mut c = a.iter().map(|a| a * &b[0]).collect::<NegaCyclicPoly<_>>();
     izip!(0.., a.iter()).for_each(|(i, a)| {
-        izip!(0.., b.iter()).for_each(|(j, b)| {
+        izip!(0.., b.iter()).skip(1).for_each(|(j, b)| {
             if i + j < n {
                 c[i + j] += a * b;
             } else {

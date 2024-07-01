@@ -37,18 +37,18 @@ impl<B: Basis> CrtRq<B> {
 }
 
 impl CrtRq<Coefficient> {
-    pub fn sample_i8(
+    pub fn sample_i64(
         n: usize,
         qs: &[u64],
-        dist: impl Distribution<i8>,
+        dist: impl Distribution<i64>,
         rng: &mut impl RngCore,
     ) -> Self {
-        Self::from_i8(&AVec::sample(n, dist, rng), qs)
+        Self::from_i64(&AVec::sample(n, dist, rng), qs)
     }
 
-    pub fn from_i8(v: &[i8], qs: &[u64]) -> Self {
+    pub fn from_i64(v: &[i64], qs: &[u64]) -> Self {
         assert!(qs.iter().all_unique());
-        CrtRq(qs.iter().copied().map(|qi| Rq::from_i8(v, qi)).collect())
+        CrtRq(qs.iter().copied().map(|qi| Rq::from_i64(v, qi)).collect())
     }
 
     pub fn from_bigint(v: Vec<BigInt>, qs: &[u64]) -> Self {
@@ -67,8 +67,8 @@ impl CrtRq<Coefficient> {
         self
     }
 
-    pub fn square(self) -> Self {
-        &self * &self
+    pub fn square(&self) -> Self {
+        self * self
     }
 
     pub fn extend_bases(mut self, ps: &[u64]) -> Self {
@@ -154,14 +154,14 @@ impl MulAssign<&CrtRq<Evaluation>> for CrtRq<Evaluation> {
     }
 }
 
-impl MulAssign<&AVec<i8>> for CrtRq<Coefficient> {
-    fn mul_assign(&mut self, rhs: &AVec<i8>) {
+impl MulAssign<&AVec<i64>> for CrtRq<Coefficient> {
+    fn mul_assign(&mut self, rhs: &AVec<i64>) {
         self.0.iter_mut().for_each(|lhs| *lhs *= rhs);
     }
 }
 
-impl MulAssign<&AVec<i8>> for CrtRq<Evaluation> {
-    fn mul_assign(&mut self, rhs: &AVec<i8>) {
+impl MulAssign<&AVec<i64>> for CrtRq<Evaluation> {
+    fn mul_assign(&mut self, rhs: &AVec<i64>) {
         self.0.iter_mut().for_each(|lhs| *lhs *= rhs);
     }
 }
@@ -261,8 +261,8 @@ impl_op_by_forwarding!(
 impl_rest_op_by_op_assign_ref!(
     impl Mul<CrtRq<Coefficient>> for CrtRq<Coefficient>,
     impl Mul<CrtRq<Evaluation>> for CrtRq<Evaluation>,
-    impl Mul<AVec<i8>> for CrtRq<Coefficient>,
-    impl Mul<AVec<i8>> for CrtRq<Evaluation>,
+    impl Mul<AVec<i64>> for CrtRq<Coefficient>,
+    impl Mul<AVec<i64>> for CrtRq<Evaluation>,
     impl Mul<BigUint> for CrtRq<Coefficient>,
     impl Mul<BigUint> for CrtRq<Evaluation>,
 );

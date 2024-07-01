@@ -1,7 +1,7 @@
 use core::f64::consts::SQRT_2;
 use rand::distributions::{Distribution, Standard, WeightedIndex};
 
-pub fn zo(rho: f64) -> impl Distribution<i8> {
+pub fn zo(rho: f64) -> impl Distribution<i64> {
     assert!(rho <= 1.0);
     Standard.map(move |v: f64| {
         if v <= rho / 2.0 {
@@ -14,7 +14,7 @@ pub fn zo(rho: f64) -> impl Distribution<i8> {
     })
 }
 
-pub fn dg(std_dev: f64, n: usize) -> impl Distribution<i8> {
+pub fn dg(std_dev: f64, n: usize) -> impl Distribution<i64> {
     // Formula 7.1.26 from Handbook of Mathematical Functions.
     let erf = |x: f64| {
         let p = 0.3275911;
@@ -33,9 +33,9 @@ pub fn dg(std_dev: f64, n: usize) -> impl Distribution<i8> {
         }
     };
     let cdf = |x| (1.0 + erf(x / (std_dev * SQRT_2))) / 2.0;
-    let max = (n as f64 * std_dev).floor() as i8;
+    let max = (n as f64 * std_dev).floor() as i64;
     let weights = (-max..=max).map(|i| cdf(i as f64 + 0.5) - cdf(i as f64 - 0.5));
     WeightedIndex::new(weights)
         .unwrap()
-        .map(move |v| v as i8 - max)
+        .map(move |v| v as i64 - max)
 }

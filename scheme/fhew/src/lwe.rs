@@ -53,7 +53,7 @@ impl LweParam {
 }
 
 #[derive(Clone, Debug)]
-pub struct LweSecretKey(pub(crate) AVec<i8>);
+pub struct LweSecretKey(pub(crate) AVec<i64>);
 
 #[derive(Clone, Debug, Add, Sub, AddAssign, SubAssign)]
 pub struct LweKeySwitchingKey(pub(crate) AVec<LweCiphertext>);
@@ -134,7 +134,7 @@ impl Lwe {
         rng: &mut impl RngCore,
     ) -> LweCiphertext {
         let a = AVec::sample_uniform(param.n, param.q(), rng);
-        let e = Zq::sample_i8(param.q(), dg(3.2, 6), rng);
+        let e = Zq::sample_i64(param.q(), dg(3.2, 6), rng);
         let b = a.dot(&sk.0) + pt.0 + e;
         LweCiphertext(a, b)
     }
@@ -175,7 +175,7 @@ impl Lwe {
         pt: LwePlaintext,
         rng: &mut impl RngCore,
     ) -> LweEncryptionShare {
-        let e = Zq::sample_i8(param.q(), dg(3.2, 6), rng);
+        let e = Zq::sample_i64(param.q(), dg(3.2, 6), rng);
         let b = a.dot(&sk.0) + pt.0 + e;
         LweEncryptionShare(b)
     }
@@ -195,7 +195,7 @@ impl Lwe {
         a: &AVec<Zq>,
         rng: &mut impl RngCore,
     ) -> LweDecryptionShare {
-        let e = Zq::sample_i8(param.q(), dg(3.2, 6), rng);
+        let e = Zq::sample_i64(param.q(), dg(3.2, 6), rng);
         let share = a.dot(&sk.0) + e;
         LweDecryptionShare(share)
     }

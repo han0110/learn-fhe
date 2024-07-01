@@ -17,6 +17,12 @@ impl<T> AVec<T> {
     pub fn sample(n: usize, dist: impl Distribution<T>, rng: &mut impl RngCore) -> Self {
         repeat_with(|| dist.sample(rng)).take(n).collect()
     }
+
+    pub fn rotate(mut self, j: i64) -> Self {
+        let mid = j.rem_euclid(self.len() as _) as _;
+        self.rotate_left(mid);
+        self
+    }
 }
 
 impl<T: Clone + Neg<Output = T>> AVec<T> {
@@ -278,7 +284,7 @@ pub(crate) use {
     impl_mul_assign_element, impl_mul_element,
 };
 
-macro_rules! impl_avec_i8_mul_zq {
+macro_rules! impl_avec_i64_mul_zq {
     ($(impl Mul<$rhs:ty> for $lhs:ty),* $(,)?) => {
         $(
             impl core::ops::Mul<$rhs> for $lhs {
@@ -286,16 +292,16 @@ macro_rules! impl_avec_i8_mul_zq {
 
                 fn mul(self, rhs: $rhs) -> AVec<Zq> {
                     let q = rhs.q();
-                    self.iter().map(|v| Zq::from_i8(q, *v) * rhs).collect()
+                    self.iter().map(|v| Zq::from_i64(q, *v) * rhs).collect()
                 }
             }
         )*
     };
 }
 
-impl_avec_i8_mul_zq!(
-    impl Mul<Zq> for AVec<i8>,
-    impl Mul<&Zq> for AVec<i8>,
-    impl Mul<Zq> for &AVec<i8>,
-    impl Mul<&Zq> for &AVec<i8>,
+impl_avec_i64_mul_zq!(
+    impl Mul<Zq> for AVec<i64>,
+    impl Mul<&Zq> for AVec<i64>,
+    impl Mul<Zq> for &AVec<i64>,
+    impl Mul<&Zq> for &AVec<i64>,
 );
