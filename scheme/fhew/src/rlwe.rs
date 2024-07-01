@@ -37,18 +37,8 @@ impl RlweSecretKey {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct RlwePublicKey(Rq, Rq);
-
-impl RlwePublicKey {
-    pub fn a(&self) -> &Rq {
-        &self.0
-    }
-
-    pub fn b(&self) -> &Rq {
-        &self.1
-    }
-}
+#[derive(Clone, Debug, Deref)]
+pub struct RlwePublicKey(RlweCiphertext);
 
 #[derive(Clone, Debug)]
 pub struct RlweKeySwitchingKey(AVec<RlweCiphertext>);
@@ -107,8 +97,7 @@ impl Rlwe {
 
     pub fn pk_gen(param: &RlweParam, sk: &RlweSecretKey, rng: &mut impl RngCore) -> RlwePublicKey {
         let zero = RlwePlaintext(Rq::zero(param.n(), param.q()));
-        let RlweCiphertext(a, b) = Rlwe::sk_encrypt(param, sk, zero, rng);
-        RlwePublicKey(a, b)
+        RlwePublicKey(Rlwe::sk_encrypt(param, sk, zero, rng))
     }
 
     pub fn key_gen(param: &RlweParam, rng: &mut impl RngCore) -> (RlweSecretKey, RlwePublicKey) {
@@ -213,7 +202,7 @@ impl Rlwe {
 }
 
 #[derive(Clone, Debug)]
-pub struct RlwePublicKeyShare(Rq);
+pub struct RlwePublicKeyShare(RlweEncryptionShare);
 
 #[derive(Clone, Debug)]
 pub struct RlweEncryptionShare(Rq);
@@ -234,17 +223,16 @@ impl Rlwe {
         rng: &mut impl RngCore,
     ) -> RlwePublicKeyShare {
         let zero = RlwePlaintext(Rq::zero(param.n(), param.q()));
-        let RlweEncryptionShare(b) = Rlwe::share_encrypt(param, a, sk, zero, rng);
-        RlwePublicKeyShare(b)
+        RlwePublicKeyShare(Rlwe::share_encrypt(param, a, sk, zero, rng))
     }
 
     pub fn pk_share_merge(
-        _: &RlweParam,
+        param: &RlweParam,
         a: Rq,
         shares: impl IntoIterator<Item = RlwePublicKeyShare>,
     ) -> RlwePublicKey {
-        let b = shares.into_iter().map(|share| share.0).sum();
-        RlwePublicKey(a, b)
+        let shares = shares.into_iter().map(|share| share.0);
+        RlwePublicKey(Rlwe::encryption_share_merge(param, a, shares))
     }
 
     pub fn share_encrypt(

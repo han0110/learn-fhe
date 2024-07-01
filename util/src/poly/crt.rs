@@ -5,12 +5,12 @@ use crate::{
     zq::impl_rest_op_by_op_assign_ref,
     AVec, Dot, Rq, Zq,
 };
-use core::{borrow::Borrow, ops::MulAssign};
+use core::{borrow::Borrow, iter::Sum, ops::MulAssign};
 use itertools::{chain, Itertools};
 use num_bigint::{BigInt, BigUint, ToBigInt};
 use num_traits::ToPrimitive;
 use rand::{distributions::Distribution, RngCore};
-use std::collections::HashSet;
+use std::{collections::HashSet, ops::AddAssign};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CrtRq<B: Basis = Coefficient>(AVec<Rq<B>>);
@@ -136,8 +136,11 @@ fn intersection(lhs: Vec<u64>, rhs: Vec<u64>) -> HashSet<u64> {
     lhs.intersection(&rhs).copied().collect()
 }
 
-impl MulAssign<&CrtRq<Coefficient>> for CrtRq<Coefficient> {
-    fn mul_assign(&mut self, rhs: &CrtRq<Coefficient>) {
+impl<B: Basis> MulAssign<&CrtRq<B>> for CrtRq<B>
+where
+    for<'t> Rq<B>: MulAssign<&'t Rq<B>>,
+{
+    fn mul_assign(&mut self, rhs: &CrtRq<B>) {
         let qs = intersection(self.qs(), rhs.qs());
         self.0.retain(|rqi| qs.contains(&rqi.q()));
         izip_eq!(&mut self.0, rhs.0.iter().filter(|p| qs.contains(&p.q())))
@@ -145,28 +148,19 @@ impl MulAssign<&CrtRq<Coefficient>> for CrtRq<Coefficient> {
     }
 }
 
-impl MulAssign<&CrtRq<Evaluation>> for CrtRq<Evaluation> {
-    fn mul_assign(&mut self, rhs: &CrtRq<Evaluation>) {
-        let qs = intersection(self.qs(), rhs.qs());
-        self.0.retain(|rqi| qs.contains(&rqi.q()));
-        izip_eq!(&mut self.0, rhs.0.iter().filter(|p| qs.contains(&p.q())))
-            .for_each(|(lhs, rhs)| *lhs *= rhs);
-    }
-}
-
-impl MulAssign<&AVec<i64>> for CrtRq<Coefficient> {
+impl<B: Basis> MulAssign<&AVec<i64>> for CrtRq<B>
+where
+    for<'t> Rq<B>: MulAssign<&'t AVec<i64>>,
+{
     fn mul_assign(&mut self, rhs: &AVec<i64>) {
         self.0.iter_mut().for_each(|lhs| *lhs *= rhs);
     }
 }
 
-impl MulAssign<&AVec<i64>> for CrtRq<Evaluation> {
-    fn mul_assign(&mut self, rhs: &AVec<i64>) {
-        self.0.iter_mut().for_each(|lhs| *lhs *= rhs);
-    }
-}
-
-impl MulAssign<&BigUint> for CrtRq<Coefficient> {
+impl<B: Basis> MulAssign<&BigUint> for CrtRq<B>
+where
+    Rq<B>: MulAssign<Zq>,
+{
     fn mul_assign(&mut self, rhs: &BigUint) {
         self.0
             .iter_mut()
@@ -174,11 +168,18 @@ impl MulAssign<&BigUint> for CrtRq<Coefficient> {
     }
 }
 
-impl MulAssign<&BigUint> for CrtRq<Evaluation> {
-    fn mul_assign(&mut self, rhs: &BigUint) {
-        self.0
-            .iter_mut()
-            .for_each(|lhs| *lhs *= Zq::from_biguint(lhs.q(), rhs));
+impl<B, Item> Sum<Item> for CrtRq<B>
+where
+    B: Basis,
+    Item: Borrow<CrtRq<B>>,
+    for<'t> CrtRq<B>: AddAssign<&'t CrtRq<B>>,
+{
+    fn sum<I: Iterator<Item = Item>>(mut iter: I) -> Self {
+        let init = iter.next().unwrap().borrow().clone();
+        iter.fold(init, |mut acc, item| {
+            acc += item.borrow();
+            acc
+        })
     }
 }
 
