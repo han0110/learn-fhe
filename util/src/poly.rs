@@ -20,7 +20,7 @@ use num_bigint::{BigInt, BigUint};
 use rand::{distributions::Distribution, RngCore};
 use std::vec;
 
-pub mod crt;
+pub mod rns;
 
 pub trait Basis: Clone + Copy + Debug + PartialEq + Eq {}
 

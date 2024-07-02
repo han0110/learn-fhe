@@ -13,12 +13,17 @@ use rand::{distributions::Distribution, RngCore};
 use std::{collections::HashSet, ops::AddAssign};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CrtRq<B: Basis = Coefficient>(AVec<Rq<B>>);
+pub struct RnsRq<B: Basis = Coefficient>(AVec<Rq<B>>);
 
-impl<B: Basis> CrtRq<B> {
-    pub fn zero(n: usize, qs: &[u64]) -> Self {
+impl<B: Basis> RnsRq<B> {
+    fn from_fn(qs: impl IntoIterator<Item: Borrow<u64>>, f: impl FnMut(u64) -> Rq<B>) -> Self {
+        let qs = qs.into_iter().map(|qi| *qi.borrow()).collect_vec();
         assert!(qs.iter().all_unique());
-        Self(qs.iter().copied().map(|qi| Rq::zero(n, qi)).collect())
+        Self(qs.into_iter().map(f).collect())
+    }
+
+    pub fn zero(n: usize, qs: impl IntoIterator<Item: Borrow<u64>>) -> Self {
+        Self::from_fn(qs, |qi| Rq::zero(n, qi))
     }
 
     pub fn n(&self) -> usize {
@@ -29,37 +34,36 @@ impl<B: Basis> CrtRq<B> {
         self.0.iter().map(Rq::q).collect()
     }
 
-    pub fn sample_uniform(n: usize, qs: &[u64], rng: &mut impl RngCore) -> Self {
-        assert!(qs.iter().all_unique());
-        let sample = |qi| Rq::sample_uniform(n, qi, rng);
-        Self(qs.iter().copied().map(sample).collect())
+    pub fn sample_uniform(
+        n: usize,
+        qs: impl IntoIterator<Item: Borrow<u64>>,
+        rng: &mut impl RngCore,
+    ) -> Self {
+        Self::from_fn(qs, |qi| Rq::sample_uniform(n, qi, rng))
     }
 }
 
-impl CrtRq<Coefficient> {
+impl RnsRq<Coefficient> {
     pub fn sample_i64(
         n: usize,
-        qs: &[u64],
+        qs: impl IntoIterator<Item: Borrow<u64>>,
         dist: impl Distribution<i64>,
         rng: &mut impl RngCore,
     ) -> Self {
         Self::from_i64(&AVec::sample(n, dist, rng), qs)
     }
 
-    pub fn from_i64(v: &[i64], qs: &[u64]) -> Self {
-        assert!(qs.iter().all_unique());
-        Self(qs.iter().copied().map(|qi| Rq::from_i64(v, qi)).collect())
+    pub fn from_i64(v: &[i64], qs: impl IntoIterator<Item: Borrow<u64>>) -> Self {
+        Self::from_fn(qs, |qi| Rq::from_i64(v, qi))
     }
 
-    pub fn from_bigint(v: Vec<BigInt>, qs: &[u64]) -> Self {
-        assert!(qs.iter().all_unique());
-        let to_rq = |qi| Rq::from_bigint(&v, qi);
-        Self(qs.iter().copied().map(to_rq).collect())
+    pub fn from_bigint(v: &[BigInt], qs: impl IntoIterator<Item: Borrow<u64>>) -> Self {
+        Self::from_fn(qs, |qi| Rq::from_bigint(v, qi))
     }
 
     pub fn into_bigint(self) -> Vec<BigInt> {
-        let crt = Crt::new(&self.qs());
-        zipstar!(self.0).map(|rems| crt.reconstruct(rems)).collect()
+        let rns = Rns::new(&self.qs());
+        zipstar!(self.0).map(|rems| rns.reconstruct(rems)).collect()
     }
 
     pub fn automorphism(mut self, t: i64) -> Self {
@@ -73,10 +77,10 @@ impl CrtRq<Coefficient> {
 
     pub fn extend_bases(mut self, ps: &[u64]) -> Self {
         assert!(chain![self.qs(), ps.iter().copied()].all_unique());
-        let crt = Crt::new(&self.qs()).with_ps(ps);
+        let rns = Rns::new(&self.qs()).with_ps(ps);
         let mut rps = ps.iter().map(|p| Rq::zero(self.n(), *p)).collect_vec();
         izip_eq!(zipstar!(&self.0), zipstar!(&mut rps))
-            .for_each(|(vqs, vps)| crt.extend_bases(vqs, vps));
+            .for_each(|(vqs, vps)| rns.extend_bases(vqs, vps));
         self.0.extend(rps);
         self
     }
@@ -136,11 +140,11 @@ fn intersection(lhs: Vec<u64>, rhs: Vec<u64>) -> HashSet<u64> {
     lhs.intersection(&rhs).copied().collect()
 }
 
-impl<B: Basis> MulAssign<&CrtRq<B>> for CrtRq<B>
+impl<B: Basis> MulAssign<&RnsRq<B>> for RnsRq<B>
 where
     for<'t> Rq<B>: MulAssign<&'t Rq<B>>,
 {
-    fn mul_assign(&mut self, rhs: &CrtRq<B>) {
+    fn mul_assign(&mut self, rhs: &RnsRq<B>) {
         let qs = intersection(self.qs(), rhs.qs());
         self.0.retain(|rqi| qs.contains(&rqi.q()));
         izip_eq!(&mut self.0, rhs.0.iter().filter(|p| qs.contains(&p.q())))
@@ -148,7 +152,7 @@ where
     }
 }
 
-impl<B: Basis> MulAssign<&AVec<i64>> for CrtRq<B>
+impl<B: Basis> MulAssign<&AVec<i64>> for RnsRq<B>
 where
     for<'t> Rq<B>: MulAssign<&'t AVec<i64>>,
 {
@@ -157,7 +161,7 @@ where
     }
 }
 
-impl<B: Basis> MulAssign<&BigUint> for CrtRq<B>
+impl<B: Basis> MulAssign<&BigUint> for RnsRq<B>
 where
     for<'t> Rq<B>: MulAssign<&'t BigUint>,
 {
@@ -166,11 +170,11 @@ where
     }
 }
 
-impl<B, Item> Sum<Item> for CrtRq<B>
+impl<B, Item> Sum<Item> for RnsRq<B>
 where
     B: Basis,
-    Item: Borrow<CrtRq<B>>,
-    for<'t> CrtRq<B>: AddAssign<&'t CrtRq<B>>,
+    Item: Borrow<RnsRq<B>>,
+    for<'t> RnsRq<B>: AddAssign<&'t RnsRq<B>>,
 {
     fn sum<I: Iterator<Item = Item>>(mut iter: I) -> Self {
         let init = iter.next().unwrap().borrow().clone();
@@ -188,7 +192,7 @@ macro_rules! impl_neg_by_forwarding {
                 type Output = $out;
 
                 fn neg(self) -> Self::Output {
-                    CrtRq(-&self.0)
+                    RnsRq(-&self.0)
                 }
             }
         }
@@ -226,7 +230,7 @@ macro_rules! impl_op_by_forwarding {
                 type Output = $out;
 
                 fn [<$trait:lower>](self, rhs: $rhs) -> Self::Output {
-                    CrtRq(core::ops::$trait::[<$trait:lower>](&self.0, &rhs.0))
+                    RnsRq(core::ops::$trait::[<$trait:lower>](&self.0, &rhs.0))
                 }
             }
         }
@@ -242,31 +246,31 @@ macro_rules! impl_op_by_forwarding {
 }
 
 impl_neg_by_forwarding!(
-    impl Neg for CrtRq<Coefficient>,
-    impl Neg for CrtRq<Evaluation>,
+    impl Neg for RnsRq<Coefficient>,
+    impl Neg for RnsRq<Evaluation>,
 );
 impl_op_assign_by_forwarding!(
-    impl AddAssign<CrtRq<Coefficient>> for CrtRq<Coefficient>,
-    impl AddAssign<CrtRq<Evaluation>> for CrtRq<Evaluation>,
-    impl SubAssign<CrtRq<Coefficient>> for CrtRq<Coefficient>,
-    impl SubAssign<CrtRq<Evaluation>> for CrtRq<Evaluation>,
+    impl AddAssign<RnsRq<Coefficient>> for RnsRq<Coefficient>,
+    impl AddAssign<RnsRq<Evaluation>> for RnsRq<Evaluation>,
+    impl SubAssign<RnsRq<Coefficient>> for RnsRq<Coefficient>,
+    impl SubAssign<RnsRq<Evaluation>> for RnsRq<Evaluation>,
 );
 impl_op_by_forwarding!(
-    impl Add<CrtRq<Coefficient>> for CrtRq<Coefficient>,
-    impl Add<CrtRq<Evaluation>> for CrtRq<Evaluation>,
-    impl Sub<CrtRq<Coefficient>> for CrtRq<Coefficient>,
-    impl Sub<CrtRq<Evaluation>> for CrtRq<Evaluation>,
+    impl Add<RnsRq<Coefficient>> for RnsRq<Coefficient>,
+    impl Add<RnsRq<Evaluation>> for RnsRq<Evaluation>,
+    impl Sub<RnsRq<Coefficient>> for RnsRq<Coefficient>,
+    impl Sub<RnsRq<Evaluation>> for RnsRq<Evaluation>,
 );
 impl_rest_op_by_op_assign_ref!(
-    impl Mul<CrtRq<Coefficient>> for CrtRq<Coefficient>,
-    impl Mul<CrtRq<Evaluation>> for CrtRq<Evaluation>,
-    impl Mul<AVec<i64>> for CrtRq<Coefficient>,
-    impl Mul<AVec<i64>> for CrtRq<Evaluation>,
-    impl Mul<BigUint> for CrtRq<Coefficient>,
-    impl Mul<BigUint> for CrtRq<Evaluation>,
+    impl Mul<RnsRq<Coefficient>> for RnsRq<Coefficient>,
+    impl Mul<RnsRq<Evaluation>> for RnsRq<Evaluation>,
+    impl Mul<AVec<i64>> for RnsRq<Coefficient>,
+    impl Mul<AVec<i64>> for RnsRq<Evaluation>,
+    impl Mul<BigUint> for RnsRq<Coefficient>,
+    impl Mul<BigUint> for RnsRq<Evaluation>,
 );
 
-struct Crt {
+struct Rns {
     q: BigUint,
     q_hats: Vec<BigUint>,
     q_hats_inv_qs: Vec<u64>,
@@ -275,7 +279,7 @@ struct Crt {
     uq_ps: Vec<Vec<Zq>>,
 }
 
-impl Crt {
+impl Rns {
     fn new(qs: &[u64]) -> Self {
         let q = qs.iter().product::<BigUint>();
         let q_hats = qs.iter().map(|qi| &q / qi).collect_vec();
@@ -356,12 +360,12 @@ impl CenteringRem<&BigUint> for &BigUint {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CrtDecomposor {
+pub struct RnsDecomposor {
     d_num: usize,
     bases: Vec<BigUint>,
 }
 
-impl CrtDecomposor {
+impl RnsDecomposor {
     pub fn new(qs: &[u64], d_num: usize) -> Self {
         let bases = {
             let big_q = &qs.iter().product::<BigUint>();
@@ -380,14 +384,14 @@ impl CrtDecomposor {
         self.d_num
     }
 
-    pub fn power_up(&self, v: CrtRq) -> impl Iterator<Item = CrtRq> + '_ {
+    pub fn power_up(&self, v: RnsRq) -> impl Iterator<Item = RnsRq> + '_ {
         self.bases.iter().map(move |bi| &v * bi)
     }
 
-    pub fn decompose<'a>(&self, v: &'a CrtRq) -> impl Iterator<Item = CrtRq> + 'a {
+    pub fn decompose<'a>(&self, v: &'a RnsRq) -> impl Iterator<Item = RnsRq> + 'a {
         let qs = v.qs();
         izip!((0..).step_by(self.d_num()), v.0.chunks(self.d_num())).map(move |(j, limb)| {
-            let limb = CrtRq(limb.into());
+            let limb = RnsRq(limb.into());
             let k = limb.qs().len();
             let ps = [&qs[..j], &qs[j + k..]].concat();
             let mut limb = limb.extend_bases(&ps);
@@ -399,7 +403,7 @@ impl CrtDecomposor {
 
 #[cfg(test)]
 mod test {
-    use crate::{two_adic_primes, CrtRq};
+    use crate::{two_adic_primes, RnsRq};
     use itertools::Itertools;
     use rand::{rngs::StdRng, SeedableRng};
 
@@ -410,7 +414,7 @@ mod test {
             let mut primes = two_adic_primes(55, log_n + 1);
             let qs = primes.by_ref().take(8).collect_vec();
             let ps = primes.by_ref().take(8).collect_vec();
-            let poly = CrtRq::sample_uniform(1 << log_n, &qs, rng);
+            let poly = RnsRq::sample_uniform(1 << log_n, &qs, rng);
             assert_eq!(
                 poly.clone().into_bigint(),
                 poly.extend_bases(&ps).into_bigint()

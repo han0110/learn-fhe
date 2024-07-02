@@ -14,7 +14,7 @@ pub use misc::{
 };
 pub use num_bigint::{BigInt, BigUint};
 pub use poly::{
-    crt::{CrtDecomposor, CrtRq},
+    rns::{RnsDecomposor, RnsRq},
     NegaCyclicPoly, Rq, X,
 };
 pub use zq::{two_adic_primes, Zq};

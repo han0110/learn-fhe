@@ -2,8 +2,8 @@ use derive_more::{Add, Deref, Sub};
 use itertools::{chain, izip, Itertools};
 use rand::RngCore;
 use util::{
-    bit_reverse, dg, powers, two_adic_primes, zo, AVec, BigFloat, BigInt, BigUint, Complex,
-    CrtDecomposor, CrtRq, Dot, NegaCyclicPoly, Zq,
+    bit_reverse, dg, powers, two_adic_primes, zo, AVec, BigFloat, BigInt, BigUint, Complex, Dot,
+    NegaCyclicPoly, RnsDecomposor, RnsRq, Zq,
 };
 
 #[derive(Clone, Debug)]
@@ -17,7 +17,7 @@ pub struct CkksParam {
     qs: Vec<u64>,
     ps: Vec<u64>,
     scale: BigFloat,
-    decomposor: Option<CrtDecomposor>,
+    decomposor: Option<RnsDecomposor>,
 }
 
 impl CkksParam {
@@ -56,7 +56,7 @@ impl CkksParam {
     }
 
     pub fn with_decomposor(mut self, d_num: usize) -> Self {
-        self.decomposor = Some(CrtDecomposor::new(&self.qps(), d_num));
+        self.decomposor = Some(RnsDecomposor::new(&self.qps(), d_num));
         self
     }
 
@@ -100,7 +100,7 @@ impl CkksParam {
         &self.scale
     }
 
-    pub fn decomposor(&self) -> &CrtDecomposor {
+    pub fn decomposor(&self) -> &RnsDecomposor {
         self.decomposor.as_ref().unwrap()
     }
 }
@@ -125,11 +125,11 @@ pub struct CkksPublicKey(CkksCiphertext);
 pub struct CkksKeySwitchingKey(Vec<CkksCiphertext>);
 
 impl CkksKeySwitchingKey {
-    pub fn a(&self) -> impl Iterator<Item = &CrtRq> {
+    pub fn a(&self) -> impl Iterator<Item = &RnsRq> {
         self.0.iter().map(|ct| ct.a())
     }
 
-    pub fn b(&self) -> impl Iterator<Item = &CrtRq> {
+    pub fn b(&self) -> impl Iterator<Item = &RnsRq> {
         self.0.iter().map(|ct| ct.b())
     }
 }
@@ -153,17 +153,17 @@ impl CkksRotKey {
 pub struct CkksCleartext(AVec<Complex>);
 
 #[derive(Clone, Debug)]
-pub struct CkksPlaintext(CrtRq);
+pub struct CkksPlaintext(RnsRq);
 
 #[derive(Clone, Debug, Add, Sub)]
-pub struct CkksCiphertext(CrtRq, CrtRq);
+pub struct CkksCiphertext(RnsRq, RnsRq);
 
 impl CkksCiphertext {
-    pub fn a(&self) -> &CrtRq {
+    pub fn a(&self) -> &RnsRq {
         &self.1
     }
 
-    pub fn b(&self) -> &CrtRq {
+    pub fn b(&self) -> &RnsRq {
         &self.0
     }
 
@@ -182,7 +182,7 @@ impl Ckks {
     }
 
     pub fn pk_gen(param: &CkksParam, sk: &CkksSecretKey, rng: &mut impl RngCore) -> CkksPublicKey {
-        let zero = CkksPlaintext(CrtRq::zero(param.n(), param.qs()));
+        let zero = CkksPlaintext(RnsRq::zero(param.n(), param.qs()));
         CkksPublicKey(Ckks::sk_encrypt(param, sk, zero, rng))
     }
 
@@ -198,7 +198,7 @@ impl Ckks {
         CkksSecretKey(sk_prime): CkksSecretKey,
         rng: &mut impl RngCore,
     ) -> CkksKeySwitchingKey {
-        let sk_prime = CrtRq::from_i64(&sk_prime, &param.qps());
+        let sk_prime = RnsRq::from_i64(&sk_prime, param.qps());
         let pt = param.decomposor().power_up(sk_prime * param.p());
         let ksk = pt
             .map(|pt| Ckks::sk_encrypt(param, sk, CkksPlaintext(pt), rng))
@@ -236,7 +236,7 @@ impl Ckks {
             .map(|z| BigInt::from(z * param.scale()))
             .collect_vec();
 
-        let pt = CrtRq::from_bigint(z_scaled, param.qs());
+        let pt = RnsRq::from_bigint(&z_scaled, param.qs());
 
         CkksPlaintext(pt)
     }
@@ -264,8 +264,8 @@ impl Ckks {
         CkksPlaintext(pt): CkksPlaintext,
         rng: &mut impl RngCore,
     ) -> CkksCiphertext {
-        let a = CrtRq::sample_uniform(pt.n(), &pt.qs(), rng) as CrtRq;
-        let e = CrtRq::sample_i64(pt.n(), &pt.qs(), dg(3.2, 6), rng);
+        let a = RnsRq::sample_uniform(pt.n(), &pt.qs(), rng) as RnsRq;
+        let e = RnsRq::sample_i64(pt.n(), &pt.qs(), dg(3.2, 6), rng);
         let b = -(&a * sk) + e + pt;
         CkksCiphertext(b, a)
     }
@@ -276,9 +276,9 @@ impl Ckks {
         CkksPlaintext(pt): CkksPlaintext,
         rng: &mut impl RngCore,
     ) -> CkksCiphertext {
-        let u = &CrtRq::sample_i64(param.n(), param.qs(), zo(0.5), rng);
-        let e0 = CrtRq::sample_i64(param.n(), param.qs(), dg(3.2, 6), rng);
-        let e1 = CrtRq::sample_i64(param.n(), param.qs(), dg(3.2, 6), rng);
+        let u = &RnsRq::sample_i64(param.n(), param.qs(), zo(0.5), rng);
+        let e0 = RnsRq::sample_i64(param.n(), param.qs(), dg(3.2, 6), rng);
+        let e1 = RnsRq::sample_i64(param.n(), param.qs(), dg(3.2, 6), rng);
         let a = pk.a() * u + e0;
         let b = pk.b() * u + e1 + pt;
         CkksCiphertext(b, a)
@@ -307,8 +307,8 @@ impl Ckks {
         (CkksCiphertext(d0, d1) + Ckks::relinearize(param, rlk, d2)).rescale()
     }
 
-    fn relinearize(param: &CkksParam, rlk: &CkksRelinKey, d2: CrtRq) -> CkksCiphertext {
-        let ct_quad = CkksCiphertext(CrtRq::zero(d2.n(), &d2.qs()), d2);
+    fn relinearize(param: &CkksParam, rlk: &CkksRelinKey, d2: RnsRq) -> CkksCiphertext {
+        let ct_quad = CkksCiphertext(RnsRq::zero(d2.n(), d2.qs()), d2);
         Ckks::key_switch(param, rlk, ct_quad)
     }
 
