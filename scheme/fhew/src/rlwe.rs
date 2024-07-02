@@ -1,6 +1,6 @@
 use crate::lwe::{LweCiphertext, LweParam, LweSecretKey};
 use derive_more::{Add, AddAssign, Deref, Sub, SubAssign};
-use itertools::chain;
+use itertools::{chain, Itertools};
 use rand::RngCore;
 use util::{dg, izip_eq, zipstar, zo, AVec, Dot, Rq, Zq};
 
@@ -112,7 +112,7 @@ impl Rlwe {
         sk1: &RlweSecretKey,
         rng: &mut impl RngCore,
     ) -> RlweKeySwitchingKey {
-        let pt = param.decomposor().bases().map(|bi| -sk1.as_avec() * bi);
+        let pt = param.decomposor().power(-sk1.as_avec());
         let ksk = pt
             .map(|pt| Rlwe::sk_encrypt(param, sk0, RlwePlaintext(pt.into()), rng))
             .collect();
@@ -178,7 +178,7 @@ impl Rlwe {
         ksk: &RlweKeySwitchingKey,
         ct: RlweCiphertext,
     ) -> RlweCiphertext {
-        let ct_a_limbs = param.decomposor().decompose(ct.a()).collect::<AVec<_>>();
+        let ct_a_limbs = param.decomposor().decompose(ct.a()).collect_vec();
         let a = ksk.a().dot(&ct_a_limbs);
         let b = ksk.b().dot(&ct_a_limbs) + ct.b();
         RlweCiphertext(a, b)
@@ -283,7 +283,7 @@ impl Rlwe {
         sk1: &RlweSecretKey,
         rng: &mut impl RngCore,
     ) -> RlweKeySwitchingKeyShare {
-        let pt = param.decomposor().bases().map(|bi| -sk1.as_avec() * bi);
+        let pt = param.decomposor().power(-sk1.as_avec());
         let ksk = izip_eq!(crs, pt)
             .map(|(a, pt)| Rlwe::share_encrypt(param, a, sk0, RlwePlaintext(pt.into()), rng))
             .collect();

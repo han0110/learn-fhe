@@ -16,7 +16,7 @@ use core::{
 };
 use derive_more::{Deref, DerefMut};
 use itertools::izip;
-use num_bigint::BigInt;
+use num_bigint::{BigInt, BigUint};
 use rand::{distributions::Distribution, RngCore};
 use std::vec;
 
@@ -246,6 +246,28 @@ impl MulAssign<&NegaCyclicPoly<i64, Coefficient>> for NegaCyclicPoly<i64, Coeffi
     }
 }
 
+impl<B: Basis> MulAssign<&BigUint> for NegaCyclicPoly<Zq, B>
+where
+    Self: MulAssign<Zq>,
+{
+    fn mul_assign(&mut self, rhs: &BigUint) {
+        *self *= Zq::from_biguint(self.q(), rhs);
+    }
+}
+
+impl MulAssign<&Monomial> for NegaCyclicPoly<Zq> {
+    fn mul_assign(&mut self, rhs: &Monomial) {
+        let n = self.n();
+        let i = rhs.0.rem_euclid(2 * n as i64) as usize;
+        self.rotate_right(i % n);
+        if i < n {
+            self[..i].iter_mut().for_each(|v| *v = -*v);
+        } else {
+            self[i - n..].iter_mut().for_each(|v| *v = -*v);
+        }
+    }
+}
+
 impl<T, B, Item> Sum<Item> for NegaCyclicPoly<T, B>
 where
     T: Clone + for<'t> AddAssign<&'t T>,
@@ -290,23 +312,11 @@ impl_rest_op_by_op_assign_ref!(
     impl Mul<NegaCyclicPoly<Zq, Evaluation>> for NegaCyclicPoly<Zq, Evaluation>,
     impl Mul<NegaCyclicPoly<i64, Coefficient>> for NegaCyclicPoly<i64, Coefficient>,
     impl Mul<AVec<i64>> for NegaCyclicPoly<Zq>,
+    impl Mul<BigUint> for NegaCyclicPoly<Zq>,
     impl Mul<Monomial> for NegaCyclicPoly<Zq>,
 );
 
 pub struct Monomial(i64);
-
-impl MulAssign<&Monomial> for NegaCyclicPoly<Zq> {
-    fn mul_assign(&mut self, rhs: &Monomial) {
-        let n = self.n();
-        let i = rhs.0.rem_euclid(2 * n as i64) as usize;
-        self.rotate_right(i % n);
-        if i < n {
-            self[..i].iter_mut().for_each(|v| *v = -*v);
-        } else {
-            self[i - n..].iter_mut().for_each(|v| *v = -*v);
-        }
-    }
-}
 
 pub struct X;
 

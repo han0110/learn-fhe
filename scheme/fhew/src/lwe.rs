@@ -1,7 +1,7 @@
 use derive_more::{Add, AddAssign, Sub, SubAssign};
-use itertools::chain;
+use itertools::Itertools;
 use rand::RngCore;
-use util::{cartesian, dg, izip_eq, zipstar, AVec, Decomposor, Dot, Zq};
+use util::{dg, izip_eq, zipstar, AVec, Base2Decomposor, Dot, Zq};
 
 #[derive(Debug)]
 pub struct Lwe;
@@ -11,7 +11,7 @@ pub struct LweParam {
     q: u64,
     p: u64,
     n: usize,
-    decomposor: Option<Decomposor>,
+    decomposor: Option<Base2Decomposor>,
 }
 
 impl LweParam {
@@ -27,7 +27,7 @@ impl LweParam {
     }
 
     pub fn with_decomposor(mut self, log_b: usize, d: usize) -> Self {
-        self.decomposor = Some(Decomposor::new(self.q(), log_b, d));
+        self.decomposor = Some(Base2Decomposor::new(self.q(), log_b, d));
         self
     }
 
@@ -47,7 +47,7 @@ impl LweParam {
         self.q as f64 / self.p as f64
     }
 
-    pub fn decomposor(&self) -> &Decomposor {
+    pub fn decomposor(&self) -> &Base2Decomposor {
         self.decomposor.as_ref().unwrap()
     }
 }
@@ -108,10 +108,10 @@ impl Lwe {
     pub fn ksk_gen(
         param: &LweParam,
         sk0: &LweSecretKey,
-        sk1: &LweSecretKey,
+        LweSecretKey(sk1): &LweSecretKey,
         rng: &mut impl RngCore,
     ) -> LweKeySwitchingKey {
-        let pt = cartesian!(&sk1.0, param.decomposor().bases()).map(|(sk1j, bi)| -bi * sk1j);
+        let pt = param.decomposor().power(-sk1).flatten();
         let ksk = pt
             .map(|pt| Lwe::sk_encrypt(param, sk0, LwePlaintext(pt), rng))
             .collect();
@@ -123,24 +123,28 @@ impl Lwe {
         LwePlaintext(Zq::from_f64(param.q(), f64::from(m) * param.delta()))
     }
 
-    pub fn decode(param: &LweParam, pt: LwePlaintext) -> Zq {
-        Zq::from_f64(param.p(), f64::from(pt.0) / param.delta())
+    pub fn decode(param: &LweParam, LwePlaintext(pt): LwePlaintext) -> Zq {
+        Zq::from_f64(param.p(), f64::from(pt) / param.delta())
     }
 
     pub fn sk_encrypt(
         param: &LweParam,
-        sk: &LweSecretKey,
-        pt: LwePlaintext,
+        LweSecretKey(sk): &LweSecretKey,
+        LwePlaintext(pt): LwePlaintext,
         rng: &mut impl RngCore,
     ) -> LweCiphertext {
         let a = AVec::sample_uniform(param.n, param.q(), rng);
         let e = Zq::sample_i64(param.q(), dg(3.2, 6), rng);
-        let b = a.dot(&sk.0) + pt.0 + e;
+        let b = a.dot(sk) + pt + e;
         LweCiphertext(a, b)
     }
 
-    pub fn decrypt(_: &LweParam, sk: &LweSecretKey, ct: LweCiphertext) -> LwePlaintext {
-        let pt = ct.b() - ct.a().dot(&sk.0);
+    pub fn decrypt(
+        _: &LweParam,
+        LweSecretKey(sk): &LweSecretKey,
+        ct: LweCiphertext,
+    ) -> LwePlaintext {
+        let pt = ct.b() - ct.a().dot(sk);
         LwePlaintext(pt)
     }
 
@@ -149,9 +153,7 @@ impl Lwe {
         ksk: &LweKeySwitchingKey,
         ct: LweCiphertext,
     ) -> LweCiphertext {
-        let ct_a_limbs = chain![ct.a()]
-            .flat_map(|a| param.decomposor().decompose(a))
-            .collect::<AVec<_>>();
+        let ct_a_limbs = param.decomposor().decompose(ct.a()).flatten().collect_vec();
         let a = ksk.a().dot(&ct_a_limbs);
         let b = ksk.b().dot(&ct_a_limbs) + ct.b();
         LweCiphertext(a, b)
@@ -171,12 +173,12 @@ impl Lwe {
     pub fn sk_share_encrypt(
         param: &LweParam,
         a: &AVec<Zq>,
-        sk: &LweSecretKey,
-        pt: LwePlaintext,
+        LweSecretKey(sk): &LweSecretKey,
+        LwePlaintext(pt): LwePlaintext,
         rng: &mut impl RngCore,
     ) -> LweEncryptionShare {
         let e = Zq::sample_i64(param.q(), dg(3.2, 6), rng);
-        let b = a.dot(&sk.0) + pt.0 + e;
+        let b = a.dot(sk) + pt + e;
         LweEncryptionShare(b)
     }
 
@@ -191,12 +193,12 @@ impl Lwe {
 
     pub fn share_decrypt(
         param: &LweParam,
-        sk: &LweSecretKey,
+        LweSecretKey(sk): &LweSecretKey,
         a: &AVec<Zq>,
         rng: &mut impl RngCore,
     ) -> LweDecryptionShare {
         let e = Zq::sample_i64(param.q(), dg(3.2, 6), rng);
-        let share = a.dot(&sk.0) + e;
+        let share = a.dot(sk) + e;
         LweDecryptionShare(share)
     }
 
@@ -213,10 +215,10 @@ impl Lwe {
         param: &LweParam,
         crs: &[AVec<Zq>],
         sk0: &LweSecretKey,
-        sk1: &LweSecretKey,
+        LweSecretKey(sk1): &LweSecretKey,
         rng: &mut impl RngCore,
     ) -> LweKeySwitchingKeyShare {
-        let pt = cartesian!(&sk1.0, param.decomposor().bases()).map(|(sk1j, bi)| -bi * sk1j);
+        let pt = param.decomposor().power(-sk1).flatten();
         let ksk = izip_eq!(crs, pt)
             .map(|(a, pt)| Lwe::sk_share_encrypt(param, a, sk0, LwePlaintext(pt), rng))
             .collect();

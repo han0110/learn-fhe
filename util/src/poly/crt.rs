@@ -6,7 +6,7 @@ use crate::{
     AVec, Dot, Rq, Zq,
 };
 use core::{borrow::Borrow, iter::Sum, ops::MulAssign};
-use itertools::{chain, Itertools};
+use itertools::{chain, izip, Itertools};
 use num_bigint::{BigInt, BigUint, ToBigInt};
 use num_traits::ToPrimitive;
 use rand::{distributions::Distribution, RngCore};
@@ -18,7 +18,7 @@ pub struct CrtRq<B: Basis = Coefficient>(AVec<Rq<B>>);
 impl<B: Basis> CrtRq<B> {
     pub fn zero(n: usize, qs: &[u64]) -> Self {
         assert!(qs.iter().all_unique());
-        CrtRq(qs.iter().copied().map(|qi| Rq::zero(n, qi)).collect())
+        Self(qs.iter().copied().map(|qi| Rq::zero(n, qi)).collect())
     }
 
     pub fn n(&self) -> usize {
@@ -32,7 +32,7 @@ impl<B: Basis> CrtRq<B> {
     pub fn sample_uniform(n: usize, qs: &[u64], rng: &mut impl RngCore) -> Self {
         assert!(qs.iter().all_unique());
         let sample = |qi| Rq::sample_uniform(n, qi, rng);
-        CrtRq(qs.iter().copied().map(sample).collect())
+        Self(qs.iter().copied().map(sample).collect())
     }
 }
 
@@ -48,13 +48,13 @@ impl CrtRq<Coefficient> {
 
     pub fn from_i64(v: &[i64], qs: &[u64]) -> Self {
         assert!(qs.iter().all_unique());
-        CrtRq(qs.iter().copied().map(|qi| Rq::from_i64(v, qi)).collect())
+        Self(qs.iter().copied().map(|qi| Rq::from_i64(v, qi)).collect())
     }
 
     pub fn from_bigint(v: Vec<BigInt>, qs: &[u64]) -> Self {
         assert!(qs.iter().all_unique());
         let to_rq = |qi| Rq::from_bigint(&v, qi);
-        CrtRq(qs.iter().copied().map(to_rq).collect())
+        Self(qs.iter().copied().map(to_rq).collect())
     }
 
     pub fn into_bigint(self) -> Vec<BigInt> {
@@ -159,12 +159,10 @@ where
 
 impl<B: Basis> MulAssign<&BigUint> for CrtRq<B>
 where
-    Rq<B>: MulAssign<Zq>,
+    for<'t> Rq<B>: MulAssign<&'t BigUint>,
 {
     fn mul_assign(&mut self, rhs: &BigUint) {
-        self.0
-            .iter_mut()
-            .for_each(|lhs| *lhs *= Zq::from_biguint(lhs.q(), rhs));
+        self.0.iter_mut().for_each(|lhs| *lhs *= rhs);
     }
 }
 
@@ -354,6 +352,48 @@ impl CenteringRem<&BigUint> for &BigUint {
         } else {
             value.to_bigint().unwrap() - rhs.to_bigint().unwrap()
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CrtDecomposor {
+    d_num: usize,
+    bases: Vec<BigUint>,
+}
+
+impl CrtDecomposor {
+    pub fn new(qs: &[u64], d_num: usize) -> Self {
+        let bases = {
+            let big_q = &qs.iter().product::<BigUint>();
+            qs.chunks(d_num)
+                .map(|qs| {
+                    let big_q_j = &qs.iter().product::<BigUint>();
+                    let big_q_hat_j = &(big_q / big_q_j);
+                    big_q_hat_j * big_q_hat_j.modinv(big_q_j).unwrap()
+                })
+                .collect()
+        };
+        Self { d_num, bases }
+    }
+
+    pub fn d_num(&self) -> usize {
+        self.d_num
+    }
+
+    pub fn power(&self, v: CrtRq) -> impl Iterator<Item = CrtRq> + '_ {
+        self.bases.iter().map(move |bi| &v * bi)
+    }
+
+    pub fn decompose<'a>(&self, v: &'a CrtRq) -> impl Iterator<Item = CrtRq> + 'a {
+        let qs = v.qs();
+        izip!((0..).step_by(self.d_num()), v.0.chunks(self.d_num())).map(move |(j, limb)| {
+            let limb = CrtRq(limb.into());
+            let k = limb.qs().len();
+            let ps = [&qs[..j], &qs[j + k..]].concat();
+            let mut limb = limb.extend_bases(&ps);
+            limb.0[..(j + k)].rotate_left(k);
+            limb
+        })
     }
 }
 

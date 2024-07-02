@@ -100,27 +100,6 @@ macro_rules! zipstar {
 }
 
 #[macro_export]
-macro_rules! cartesian {
-    (@closure $p:pat => $tup:expr) => {
-        |$p| $tup
-    };
-    (@closure $p:pat => ($($tup:tt)*) , $_iter:expr $(, $tail:expr)*) => {
-        $crate::cartesian!(@closure ($p, b) => ($($tup)*, b) $(, $tail)*)
-    };
-    ($first:expr $(,)*) => {
-        itertools::__std_iter::IntoIterator::into_iter($first)
-    };
-    ($first:expr, $second:expr $(,)*) => {
-        itertools::Itertools::cartesian_product($crate::cartesian!($first), $second)
-    };
-    ($first:expr $(, $rest:expr)* $(,)*) => {
-        let t = $crate::cartesian_product!($first);
-        $(let t = $crate::cartesian_product!(t, $rest);)*
-        t.map($crate::cartesian_product!(@closure a => (a) $(, $rest)*))
-    };
-}
-
-#[macro_export]
 macro_rules! vec_with {
     [|| $f:expr; $n:expr] => {
         core::iter::repeat_with(|| $f).take($n).collect::<Vec<_>>()

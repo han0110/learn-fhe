@@ -1,16 +1,16 @@
 use crate::Zq;
-use core::iter::repeat_with;
+use core::{iter::repeat_with, ops::Mul};
 use itertools::Itertools;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Decomposor {
+pub struct Base2Decomposor {
     q: u64,
     log_b: usize,
     d: usize,
     rounding_bits: usize,
 }
 
-impl Decomposor {
+impl Base2Decomposor {
     pub fn new(q: u64, log_b: usize, d: usize) -> Self {
         let log_q_ceil = q.next_power_of_two().ilog2() as usize;
         let rounding_bits = log_q_ceil.saturating_sub(log_b * d);
@@ -30,25 +30,28 @@ impl Decomposor {
         (self.rounding_bits..).step_by(self.log_b).take(self.d)
     }
 
-    pub fn bases(&self) -> impl Iterator<Item = Zq> + Clone + '_ {
-        self.log_bases().map(|bits| Zq::from_u64(self.q, 1 << bits))
+    pub fn power<'a, T: 'a, O>(&'a self, v: T) -> impl Iterator<Item = O> + 'a
+    where
+        for<'t> &'t T: Mul<Zq, Output = O>,
+    {
+        self.log_bases()
+            .map(move |bits| &v * Zq::from_u64(self.q, 1 << bits))
     }
 
-    pub fn decompose<T: Decomposable>(&self, value: &T) -> impl Iterator<Item = T> {
-        value
-            .rounding_shr(self.rounding_bits)
+    pub fn decompose<T: Base2Decomposable>(&self, v: &T) -> impl Iterator<Item = T> {
+        v.rounding_shr(self.rounding_bits)
             .decompose(self.log_b)
             .take(self.d)
     }
 }
 
-pub trait Decomposable: Sized {
+pub trait Base2Decomposable: Sized {
     fn rounding_shr(&self, bits: usize) -> Self;
 
     fn decompose(self, log_b: usize) -> impl Iterator<Item = Self>;
 }
 
-impl Decomposable for Zq {
+impl Base2Decomposable for Zq {
     fn rounding_shr(&self, bits: usize) -> Self {
         let rounded = self + ((1u64 << bits) >> 1);
         Zq::from_u64(self.q(), rounded.to_u64() >> bits)
@@ -67,10 +70,10 @@ impl Decomposable for Zq {
     }
 }
 
-impl<T> Decomposable for T
+impl<T> Base2Decomposable for T
 where
     T: IntoIterator + FromIterator<T::Item>,
-    T::Item: Decomposable,
+    T::Item: Base2Decomposable,
     for<'t> &'t T: IntoIterator<Item = &'t T::Item>,
 {
     fn rounding_shr(&self, bits: usize) -> Self {
