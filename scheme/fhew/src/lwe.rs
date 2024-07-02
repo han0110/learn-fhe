@@ -101,7 +101,7 @@ impl LweCiphertext {
 
 impl Lwe {
     pub fn sk_gen(param: &LweParam, rng: &mut impl RngCore) -> LweSecretKey {
-        let sk = AVec::sample(param.n, dg(3.2, 6), rng);
+        let sk = AVec::sample(param.n(), dg(3.2, 6), rng);
         LweSecretKey(sk)
     }
 
@@ -133,7 +133,7 @@ impl Lwe {
         LwePlaintext(pt): LwePlaintext,
         rng: &mut impl RngCore,
     ) -> LweCiphertext {
-        let a = AVec::sample_uniform(param.n, param.q(), rng);
+        let a = AVec::sample_uniform(param.q(), param.n(), rng);
         let e = Zq::sample_i64(param.q(), dg(3.2, 6), rng);
         let b = a.dot(sk) + pt + e;
         LweCiphertext(a, b)

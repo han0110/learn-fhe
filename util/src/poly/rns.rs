@@ -22,8 +22,8 @@ impl<B: Basis> RnsRq<B> {
         Self(qs.into_iter().map(f).collect())
     }
 
-    pub fn zero(n: usize, qs: impl IntoIterator<Item: Borrow<u64>>) -> Self {
-        Self::from_fn(qs, |qi| Rq::zero(n, qi))
+    pub fn zero(qs: impl IntoIterator<Item: Borrow<u64>>, n: usize) -> Self {
+        Self::from_fn(qs, |qi| Rq::zero(qi, n))
     }
 
     pub fn n(&self) -> usize {
@@ -35,34 +35,34 @@ impl<B: Basis> RnsRq<B> {
     }
 
     pub fn sample_uniform(
-        n: usize,
         qs: impl IntoIterator<Item: Borrow<u64>>,
+        n: usize,
         rng: &mut impl RngCore,
     ) -> Self {
-        Self::from_fn(qs, |qi| Rq::sample_uniform(n, qi, rng))
+        Self::from_fn(qs, |qi| Rq::sample_uniform(qi, n, rng))
     }
 }
 
 impl RnsRq<Coefficient> {
     pub fn sample_i64(
-        n: usize,
         qs: impl IntoIterator<Item: Borrow<u64>>,
+        n: usize,
         dist: impl Distribution<i64>,
         rng: &mut impl RngCore,
     ) -> Self {
-        Self::from_i64(&AVec::sample(n, dist, rng), qs)
+        Self::from_i64(qs, &AVec::sample(n, dist, rng))
     }
 
-    pub fn from_i64(v: &[i64], qs: impl IntoIterator<Item: Borrow<u64>>) -> Self {
-        Self::from_fn(qs, |qi| Rq::from_i64(v, qi))
+    pub fn from_i64(qs: impl IntoIterator<Item: Borrow<u64>>, v: &[i64]) -> Self {
+        Self::from_fn(qs, |qi| Rq::from_i64(qi, v))
     }
 
-    pub fn from_bigint(v: &[BigInt], qs: impl IntoIterator<Item: Borrow<u64>>) -> Self {
-        Self::from_fn(qs, |qi| Rq::from_bigint(v, qi))
+    pub fn from_bigint(qs: impl IntoIterator<Item: Borrow<u64>>, v: &[BigInt]) -> Self {
+        Self::from_fn(qs, |qi| Rq::from_bigint(qi, v))
     }
 
     pub fn into_bigint(self) -> Vec<BigInt> {
-        let rns = Rns::new(&self.qs());
+        let rns = Rns::new(self.qs());
         zipstar!(self.0).map(|rems| rns.reconstruct(rems)).collect()
     }
 
@@ -77,11 +77,11 @@ impl RnsRq<Coefficient> {
 
     pub fn extend_bases(mut self, ps: &[u64]) -> Self {
         assert!(chain![self.qs(), ps.iter().copied()].all_unique());
-        let rns = Rns::new(&self.qs()).with_ps(ps);
-        let mut rps = ps.iter().map(|p| Rq::zero(self.n(), *p)).collect_vec();
-        izip_eq!(zipstar!(&self.0), zipstar!(&mut rps))
+        let rns = Rns::new(self.qs()).with_ps(ps);
+        let mut rps = Self::zero(ps, self.n());
+        izip_eq!(zipstar!(&self.0), zipstar!(&mut rps.0))
             .for_each(|(vqs, vps)| rns.extend_bases(vqs, vps));
-        self.0.extend(rps);
+        self.0.extend(rps.0);
         self
     }
 
@@ -280,13 +280,13 @@ struct Rns {
 }
 
 impl Rns {
-    fn new(qs: &[u64]) -> Self {
+    fn new(qs: Vec<u64>) -> Self {
         let q = qs.iter().product::<BigUint>();
         let q_hats = qs.iter().map(|qi| &q / qi).collect_vec();
-        let q_hats_inv_qs = izip_eq!(qs, &q_hats)
+        let q_hats_inv_qs = izip_eq!(&qs, &q_hats)
             .map(|(qi, qi_hat)| qi_hat.modinv(&(*qi).into()).unwrap().to_u64().unwrap())
             .collect_vec();
-        let q_fracs = qs.iter().map(|qi| 1.0 / *qi as f64).collect_vec();
+        let q_fracs = qs.into_iter().map(|qi| 1.0 / qi as f64).collect_vec();
         Self {
             q,
             q_hats,
@@ -414,7 +414,7 @@ mod test {
             let mut primes = two_adic_primes(55, log_n + 1);
             let qs = primes.by_ref().take(8).collect_vec();
             let ps = primes.by_ref().take(8).collect_vec();
-            let poly = RnsRq::sample_uniform(1 << log_n, &qs, rng);
+            let poly = RnsRq::sample_uniform(qs, 1 << log_n, rng);
             assert_eq!(
                 poly.clone().into_bigint(),
                 poly.extend_bases(&ps).into_bigint()

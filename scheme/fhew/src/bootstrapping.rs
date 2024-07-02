@@ -127,7 +127,7 @@ impl Bootstrapping {
         let s = Lwe::sk_gen(param.lwe_s(), rng);
         let ksk = Lwe::ksk_gen(param.lwe_s(), &s, z, rng);
         let brk = {
-            let one = &Rq::one(param.n(), param.big_q());
+            let one = &Rq::one(param.big_q(), param.n());
             s.0.iter()
                 .map(|sj| one * (X ^ sj))
                 .map(|pt| Rgsw::sk_encrypt(param.rgsw(), z, RgswPlaintext(pt), rng))
@@ -253,12 +253,12 @@ impl Bootstrapping {
         param: &BootstrappingParam,
         rng: &mut impl RngCore,
     ) -> BootstrappingCommonRefStr {
-        let pk = Rq::sample_uniform(param.n(), param.big_q(), rng);
-        let ksk = repeat_with(|| AVec::sample_uniform(param.lwe_s().n(), param.big_q_ks(), rng))
+        let pk = Rq::sample_uniform(param.big_q(), param.n(), rng);
+        let ksk = repeat_with(|| AVec::sample_uniform(param.big_q_ks(), param.lwe_s().n(), rng))
             .take(param.n() * param.lwe_s().decomposor().d())
             .collect();
         let ak = repeat_with(|| {
-            repeat_with(|| Rq::sample_uniform(param.n(), param.big_q(), rng))
+            repeat_with(|| Rq::sample_uniform(param.big_q(), param.n(), rng))
                 .take(param.rlwe().decomposor().d())
                 .collect()
         })
@@ -277,7 +277,7 @@ impl Bootstrapping {
         let s = Lwe::sk_gen(param.lwe_s(), rng);
         let ksk = Lwe::ksk_share_gen(param.lwe_s(), &crs.ksk, &s, z, rng);
         let brk = {
-            let one = &Rq::one(param.n(), param.big_q());
+            let one = &Rq::one(param.big_q(), param.n());
             s.0.iter()
                 .map(|sj| one * (X ^ sj))
                 .map(|pt| Rgsw::pk_encrypt(param.rgsw(), pk, RgswPlaintext(pt), rng))

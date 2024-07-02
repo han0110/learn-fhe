@@ -182,7 +182,7 @@ impl Ckks {
     }
 
     pub fn pk_gen(param: &CkksParam, sk: &CkksSecretKey, rng: &mut impl RngCore) -> CkksPublicKey {
-        let zero = CkksPlaintext(RnsRq::zero(param.n(), param.qs()));
+        let zero = CkksPlaintext(RnsRq::zero(param.qs(), param.n()));
         CkksPublicKey(Ckks::sk_encrypt(param, sk, zero, rng))
     }
 
@@ -198,7 +198,7 @@ impl Ckks {
         CkksSecretKey(sk_prime): CkksSecretKey,
         rng: &mut impl RngCore,
     ) -> CkksKeySwitchingKey {
-        let sk_prime = RnsRq::from_i64(&sk_prime, param.qps());
+        let sk_prime = RnsRq::from_i64(param.qps(), &sk_prime);
         let pt = param.decomposor().power_up(sk_prime * param.p());
         let ksk = pt
             .map(|pt| Ckks::sk_encrypt(param, sk, CkksPlaintext(pt), rng))
@@ -236,7 +236,7 @@ impl Ckks {
             .map(|z| BigInt::from(z * param.scale()))
             .collect_vec();
 
-        let pt = RnsRq::from_bigint(&z_scaled, param.qs());
+        let pt = RnsRq::from_bigint(param.qs(), &z_scaled);
 
         CkksPlaintext(pt)
     }
@@ -264,8 +264,8 @@ impl Ckks {
         CkksPlaintext(pt): CkksPlaintext,
         rng: &mut impl RngCore,
     ) -> CkksCiphertext {
-        let a = RnsRq::sample_uniform(pt.n(), &pt.qs(), rng) as RnsRq;
-        let e = RnsRq::sample_i64(pt.n(), &pt.qs(), dg(3.2, 6), rng);
+        let a = RnsRq::sample_uniform(pt.qs(), pt.n(), rng) as RnsRq;
+        let e = RnsRq::sample_i64(pt.qs(), pt.n(), dg(3.2, 6), rng);
         let b = -(&a * sk) + e + pt;
         CkksCiphertext(b, a)
     }
@@ -276,9 +276,9 @@ impl Ckks {
         CkksPlaintext(pt): CkksPlaintext,
         rng: &mut impl RngCore,
     ) -> CkksCiphertext {
-        let u = &RnsRq::sample_i64(param.n(), param.qs(), zo(0.5), rng);
-        let e0 = RnsRq::sample_i64(param.n(), param.qs(), dg(3.2, 6), rng);
-        let e1 = RnsRq::sample_i64(param.n(), param.qs(), dg(3.2, 6), rng);
+        let u = &RnsRq::sample_i64(param.qs(), param.n(), zo(0.5), rng);
+        let e0 = RnsRq::sample_i64(param.qs(), param.n(), dg(3.2, 6), rng);
+        let e1 = RnsRq::sample_i64(param.qs(), param.n(), dg(3.2, 6), rng);
         let a = pk.a() * u + e0;
         let b = pk.b() * u + e1 + pt;
         CkksCiphertext(b, a)
@@ -308,7 +308,7 @@ impl Ckks {
     }
 
     fn relinearize(param: &CkksParam, rlk: &CkksRelinKey, d2: RnsRq) -> CkksCiphertext {
-        let ct_quad = CkksCiphertext(RnsRq::zero(d2.n(), d2.qs()), d2);
+        let ct_quad = CkksCiphertext(RnsRq::zero(d2.qs(), d2.n()), d2);
         Ckks::key_switch(param, rlk, ct_quad)
     }
 

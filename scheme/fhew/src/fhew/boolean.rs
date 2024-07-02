@@ -27,7 +27,7 @@ impl<T: Borrow<BootstrappingParam>> FhewBool<T> {
     pub fn pk_encrypt(bk: T, pk: &RlwePublicKey, m: bool, rng: &mut impl RngCore) -> Self {
         let param = bk.borrow();
         assert_eq!(param.p(), 4);
-        let m = Rq::constant(param.n(), Zq::from_bool(param.p(), m));
+        let m = Rq::constant(Zq::from_bool(param.p(), m), param.n());
         let pt = Rlwe::encode(param.rlwe(), m);
         let ct = Rlwe::pk_encrypt(param.rlwe(), pk, pt, rng);
         let ct = Rlwe::sample_extract(param.rlwe(), ct, 0);

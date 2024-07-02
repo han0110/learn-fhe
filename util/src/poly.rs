@@ -73,12 +73,12 @@ impl<T: Copy + Neg<Output = T>> NegaCyclicPoly<T, Coefficient> {
 }
 
 impl<B: Basis> NegaCyclicPoly<Zq, B> {
-    pub fn zero(n: usize, q: u64) -> Self {
+    pub fn zero(q: u64, n: usize) -> Self {
         Self::new(vec![Zq::from_u64(q, 0); n].into())
     }
 
-    pub fn sample_uniform(n: usize, q: u64, rng: &mut impl RngCore) -> Self {
-        Self::new(AVec::sample_uniform(n, q, rng))
+    pub fn sample_uniform(q: u64, n: usize, rng: &mut impl RngCore) -> Self {
+        Self::new(AVec::sample_uniform(q, n, rng))
     }
 
     pub fn mod_switch(&self, q_prime: u64) -> Self {
@@ -93,34 +93,34 @@ impl<B: Basis> NegaCyclicPoly<Zq, B> {
         self[0].q()
     }
 
-    fn from_bigint(v: &[BigInt], q: u64) -> Self {
+    fn from_bigint(q: u64, v: &[BigInt]) -> Self {
         Self::new(v.iter().map(|v| Zq::from_bigint(q, v)).collect())
     }
 }
 
 impl NegaCyclicPoly<Zq, Coefficient> {
-    pub fn one(n: usize, q: u64) -> Self {
-        let mut poly = Self::zero(n, q);
+    pub fn one(q: u64, n: usize) -> Self {
+        let mut poly = Self::zero(q, n);
         poly[0] += 1;
         poly
     }
 
-    pub fn constant(n: usize, v: Zq) -> Self {
-        let mut poly = Self::zero(n, v.q());
+    pub fn constant(v: Zq, n: usize) -> Self {
+        let mut poly = Self::zero(v.q(), n);
         poly[0] = v;
         poly
     }
 
     pub fn sample_i64(
-        n: usize,
         q: u64,
+        n: usize,
         dist: impl Distribution<i64>,
         rng: &mut impl RngCore,
     ) -> Self {
-        Self::from_i64(&AVec::sample(n, dist, rng), q)
+        Self::from_i64(q, &AVec::sample(n, dist, rng))
     }
 
-    fn from_i64(v: &[i64], q: u64) -> Self {
+    fn from_i64(q: u64, v: &[i64]) -> Self {
         Self::new(v.iter().map(|v| Zq::from_i64(q, *v)).collect())
     }
 
@@ -230,13 +230,13 @@ impl MulAssign<&NegaCyclicPoly<Zq, Evaluation>> for NegaCyclicPoly<Zq, Evaluatio
 
 impl MulAssign<&AVec<i64>> for NegaCyclicPoly<Zq, Coefficient> {
     fn mul_assign(&mut self, rhs: &AVec<i64>) {
-        *self *= Self::from_i64(rhs, self.q());
+        *self *= Self::from_i64(self.q(), rhs);
     }
 }
 
 impl MulAssign<&AVec<i64>> for NegaCyclicPoly<Zq, Evaluation> {
     fn mul_assign(&mut self, rhs: &AVec<i64>) {
-        *self *= NegaCyclicPoly::from_i64(rhs, self.q()).to_evaluation();
+        *self *= NegaCyclicPoly::from_i64(self.q(), rhs).to_evaluation();
     }
 }
 
@@ -447,7 +447,7 @@ mod test {
         for log_n in 0..10 {
             let n = 1 << log_n;
             for q in two_adic_primes(45, log_n + 1).take(10) {
-                let [a, b] = &from_fn(|_| NegaCyclicPoly::sample_uniform(n, q, &mut rng));
+                let [a, b] = &from_fn(|_| NegaCyclicPoly::sample_uniform(q, n, &mut rng));
                 assert_eq!(a * b, nega_cyclic_schoolbook_mul(a, b));
             }
         }

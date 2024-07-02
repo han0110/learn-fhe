@@ -53,11 +53,11 @@ where
 }
 
 impl AVec<Zq> {
-    pub fn zero(n: usize, q: u64) -> Self {
+    pub fn zero(q: u64, n: usize) -> Self {
         Self(vec![Zq::from_u64(q, 0); n])
     }
 
-    pub fn sample_uniform(n: usize, q: u64, rng: &mut impl RngCore) -> Self {
+    pub fn sample_uniform(q: u64, n: usize, rng: &mut impl RngCore) -> Self {
         repeat_with(|| Zq::sample_uniform(q, rng)).take(n).collect()
     }
 

@@ -84,7 +84,7 @@ impl RlweCiphertext {
 
 impl From<RlwePlaintext> for RlweCiphertext {
     fn from(RlwePlaintext(b): RlwePlaintext) -> Self {
-        Self(Rq::zero(b.n(), b.q()), b)
+        Self(Rq::zero(b.q(), b.n()), b)
     }
 }
 
@@ -96,7 +96,7 @@ impl Rlwe {
     }
 
     pub fn pk_gen(param: &RlweParam, sk: &RlweSecretKey, rng: &mut impl RngCore) -> RlwePublicKey {
-        let zero = RlwePlaintext(Rq::zero(param.n(), param.q()));
+        let zero = RlwePlaintext(Rq::zero(param.q(), param.n()));
         RlwePublicKey(Rlwe::sk_encrypt(param, sk, zero, rng))
     }
 
@@ -148,8 +148,8 @@ impl Rlwe {
         pt: RlwePlaintext,
         rng: &mut impl RngCore,
     ) -> RlweCiphertext {
-        let a = Rq::sample_uniform(param.n(), param.q(), rng);
-        let e = Rq::sample_i64(param.n(), param.q(), dg(3.2, 6), rng);
+        let a = Rq::sample_uniform(param.q(), param.n(), rng);
+        let e = Rq::sample_i64(param.q(), param.n(), dg(3.2, 6), rng);
         let b = &a * sk.as_avec() + e + pt.0;
         RlweCiphertext(a, b)
     }
@@ -160,9 +160,9 @@ impl Rlwe {
         pt: RlwePlaintext,
         rng: &mut impl RngCore,
     ) -> RlweCiphertext {
-        let u = &Rq::sample_i64(param.n(), param.q(), zo(0.5), rng);
-        let e0 = Rq::sample_i64(param.n(), param.q(), dg(3.2, 6), rng);
-        let e1 = Rq::sample_i64(param.n(), param.q(), dg(3.2, 6), rng);
+        let u = &Rq::sample_i64(param.q(), param.n(), zo(0.5), rng);
+        let e0 = Rq::sample_i64(param.q(), param.n(), dg(3.2, 6), rng);
+        let e1 = Rq::sample_i64(param.q(), param.n(), dg(3.2, 6), rng);
         let a = pk.a() * u + e0;
         let b = pk.b() * u + e1 + pt.0;
         RlweCiphertext(a, b)
@@ -222,7 +222,7 @@ impl Rlwe {
         sk: &RlweSecretKey,
         rng: &mut impl RngCore,
     ) -> RlwePublicKeyShare {
-        let zero = RlwePlaintext(Rq::zero(param.n(), param.q()));
+        let zero = RlwePlaintext(Rq::zero(param.q(), param.n()));
         RlwePublicKeyShare(Rlwe::share_encrypt(param, a, sk, zero, rng))
     }
 
@@ -242,7 +242,7 @@ impl Rlwe {
         pt: RlwePlaintext,
         rng: &mut impl RngCore,
     ) -> RlweEncryptionShare {
-        let e = Rq::sample_i64(param.n(), param.q(), dg(3.2, 6), rng);
+        let e = Rq::sample_i64(param.q(), param.n(), dg(3.2, 6), rng);
         let b = a * sk.as_avec() + e + pt.0;
         RlweEncryptionShare(b)
     }
@@ -262,7 +262,7 @@ impl Rlwe {
         a: &Rq,
         rng: &mut impl RngCore,
     ) -> RlweDecryptionShare {
-        let e = Rq::sample_i64(param.n(), param.q(), dg(3.2, 6), rng);
+        let e = Rq::sample_i64(param.q(), param.n(), dg(3.2, 6), rng);
         let share = a * sk.as_avec() + e;
         RlweDecryptionShare(share)
     }
@@ -347,7 +347,7 @@ pub(crate) mod test {
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RlweParam::new(q, p, log_n);
             let (sk, pk) = Rlwe::key_gen(&param, &mut rng);
-            let m = Rq::sample_uniform(param.n(), p, &mut rng);
+            let m = Rq::sample_uniform(p, param.n(), &mut rng);
             let pt0 = Rlwe::encode(&param, m.clone());
             let pt1 = Rlwe::encode(&param, m.clone());
             let ct0 = Rlwe::sk_encrypt(&param, &sk, pt0, &mut rng);
@@ -364,7 +364,7 @@ pub(crate) mod test {
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RlweParam::new(q, p, log_n);
             let (sk, pk) = Rlwe::key_gen(&param, &mut rng);
-            let [m0, m1] = &from_fn(|_| Rq::sample_uniform(param.n(), p, &mut rng));
+            let [m0, m1] = &from_fn(|_| Rq::sample_uniform(p, param.n(), &mut rng));
             let [pt0, pt1] = [m0, m1].map(|m| Rlwe::encode(&param, m.clone()));
             let [ct0, ct1] = [pt0, pt1].map(|pt| Rlwe::pk_encrypt(&param, &pk, pt, &mut rng));
             let (m2, ct2) = (m0 + m1, ct0.clone() + ct1.clone());
@@ -384,7 +384,7 @@ pub(crate) mod test {
             let (sk0, pk0) = Rlwe::key_gen(&param0, &mut rng);
             let (sk1, _) = Rlwe::key_gen(&param1, &mut rng);
             let ksk = Rlwe::ksk_gen(&param1, &sk1, &sk0, &mut rng);
-            let m = Rq::sample_uniform(param0.n(), p, &mut rng);
+            let m = Rq::sample_uniform(p, param0.n(), &mut rng);
             let pt = Rlwe::encode(&param0, m.clone());
             let ct0 = Rlwe::pk_encrypt(&param0, &pk0, pt, &mut rng);
             let ct1 = Rlwe::key_switch(&param1, &ksk, ct0);
@@ -401,7 +401,7 @@ pub(crate) mod test {
                 let param = RlweParam::new(q, p, log_n).with_decomposor(log_b, d);
                 let (sk, pk) = Rlwe::key_gen(&param, &mut rng);
                 let ak = Rlwe::ak_gen(&param, t, &sk, &mut rng);
-                let m = Rq::sample_uniform(param.n(), p, &mut rng);
+                let m = Rq::sample_uniform(p, param.n(), &mut rng);
                 let pt = Rlwe::encode(&param, m.clone());
                 let ct0 = Rlwe::pk_encrypt(&param, &pk, pt, &mut rng);
                 let ct1 = Rlwe::automorphism(&param, &ak, ct0);
@@ -420,7 +420,7 @@ pub(crate) mod test {
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RlweParam::new(q, p, log_n);
             let (sk, pk) = Rlwe::key_gen(&param, &mut rng);
-            let m = Rq::sample_uniform(param.n(), p, &mut rng);
+            let m = Rq::sample_uniform(p, param.n(), &mut rng);
             let pt = Rlwe::encode(&param, m.clone());
             let ct = Rlwe::pk_encrypt(&param, &pk, pt, &mut rng);
             for i in 0..param.n() {
@@ -438,14 +438,14 @@ pub(crate) mod test {
         let (log_n_range, log_q, p) = (0..10, 45, 1 << 4);
         for (log_n, q) in testing_n_q(log_n_range, log_q) {
             let param = RlweParam::new(q, p, log_n);
-            let a = Rq::sample_uniform(param.n(), param.q(), &mut rng);
+            let a = Rq::sample_uniform(param.q(), param.n(), &mut rng);
             let sk_shares: [_; N] = from_fn(|_| Rlwe::sk_gen(&param, &mut rng));
             let pk = {
                 let pk_share_gen = |sk| Rlwe::pk_share_gen(&param, &a, sk, &mut rng);
                 let pk_shares = sk_shares.each_ref().map(pk_share_gen);
                 Rlwe::pk_share_merge(&param, a, pk_shares)
             };
-            let m = Rq::sample_uniform(param.n(), p, &mut rng);
+            let m = Rq::sample_uniform(p, param.n(), &mut rng);
             let ct = Rlwe::pk_encrypt(&param, &pk, Rlwe::encode(&param, m.clone()), &mut rng);
             let pt = {
                 let d_shares = sk_shares
