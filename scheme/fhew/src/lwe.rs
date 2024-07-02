@@ -111,7 +111,7 @@ impl Lwe {
         LweSecretKey(sk1): &LweSecretKey,
         rng: &mut impl RngCore,
     ) -> LweKeySwitchingKey {
-        let pt = param.decomposor().power(-sk1).flatten();
+        let pt = param.decomposor().power_up(-sk1).flatten();
         let ksk = pt
             .map(|pt| Lwe::sk_encrypt(param, sk0, LwePlaintext(pt), rng))
             .collect();
@@ -218,7 +218,7 @@ impl Lwe {
         LweSecretKey(sk1): &LweSecretKey,
         rng: &mut impl RngCore,
     ) -> LweKeySwitchingKeyShare {
-        let pt = param.decomposor().power(-sk1).flatten();
+        let pt = param.decomposor().power_up(-sk1).flatten();
         let ksk = izip_eq!(crs, pt)
             .map(|(a, pt)| Lwe::sk_share_encrypt(param, a, sk0, LwePlaintext(pt), rng))
             .collect();

@@ -199,7 +199,7 @@ impl Ckks {
         rng: &mut impl RngCore,
     ) -> CkksKeySwitchingKey {
         let sk_prime = CrtRq::from_i64(&sk_prime, &param.qps());
-        let pt = param.decomposor().power(sk_prime * param.p());
+        let pt = param.decomposor().power_up(sk_prime * param.p());
         let ksk = pt
             .map(|pt| Ckks::sk_encrypt(param, sk, CkksPlaintext(pt), rng))
             .collect();

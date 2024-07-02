@@ -112,7 +112,7 @@ impl Rlwe {
         sk1: &RlweSecretKey,
         rng: &mut impl RngCore,
     ) -> RlweKeySwitchingKey {
-        let pt = param.decomposor().power(-sk1.as_avec());
+        let pt = param.decomposor().power_up(-sk1.as_avec());
         let ksk = pt
             .map(|pt| Rlwe::sk_encrypt(param, sk0, RlwePlaintext(pt.into()), rng))
             .collect();
@@ -283,7 +283,7 @@ impl Rlwe {
         sk1: &RlweSecretKey,
         rng: &mut impl RngCore,
     ) -> RlweKeySwitchingKeyShare {
-        let pt = param.decomposor().power(-sk1.as_avec());
+        let pt = param.decomposor().power_up(-sk1.as_avec());
         let ksk = izip_eq!(crs, pt)
             .map(|(a, pt)| Rlwe::share_encrypt(param, a, sk0, RlwePlaintext(pt.into()), rng))
             .collect();

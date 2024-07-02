@@ -380,7 +380,7 @@ impl CrtDecomposor {
         self.d_num
     }
 
-    pub fn power(&self, v: CrtRq) -> impl Iterator<Item = CrtRq> + '_ {
+    pub fn power_up(&self, v: CrtRq) -> impl Iterator<Item = CrtRq> + '_ {
         self.bases.iter().map(move |bi| &v * bi)
     }
 

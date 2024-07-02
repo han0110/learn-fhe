@@ -87,7 +87,7 @@ impl Rgsw {
         pt: RgswPlaintext,
         rng: &mut impl RngCore,
     ) -> RgswCiphertext {
-        let pt = param.decomposor().power(pt.0).collect_vec();
+        let pt = param.decomposor().power_up(pt.0).collect_vec();
         let mut ct = {
             let zero = RlwePlaintext(Rq::zero(param.n(), param.q()));
             let rlwe_encrypt_zero = || match key {

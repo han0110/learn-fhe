@@ -30,7 +30,7 @@ impl Base2Decomposor {
         (self.rounding_bits..).step_by(self.log_b).take(self.d)
     }
 
-    pub fn power<'a, T: 'a, O>(&'a self, v: T) -> impl Iterator<Item = O> + 'a
+    pub fn power_up<'a, T: 'a, O>(&'a self, v: T) -> impl Iterator<Item = O> + 'a
     where
         for<'t> &'t T: Mul<Zq, Output = O>,
     {
