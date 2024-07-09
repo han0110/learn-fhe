@@ -6,7 +6,7 @@ use crate::{
     AVec, Dot, Rq, Zq,
 };
 use core::{borrow::Borrow, iter::Sum, ops::MulAssign};
-use itertools::{chain, izip, Itertools};
+use itertools::{chain, Itertools};
 use num_bigint::{BigInt, BigUint, ToBigInt};
 use num_traits::ToPrimitive;
 use rand::{distributions::Distribution, RngCore};
@@ -63,7 +63,7 @@ impl RnsRq<Coefficient> {
 
     pub fn into_bigint(self) -> Vec<BigInt> {
         let rns = Rns::new(self.qs());
-        zipstar!(self.0).map(|rems| rns.reconstruct(rems)).collect()
+        zipstar!(self.0).map(|vqs| rns.reconstruct(vqs)).collect()
     }
 
     pub fn automorphism(mut self, t: i64) -> Self {
@@ -316,9 +316,9 @@ impl Rns {
         self
     }
 
-    fn reconstruct(&self, rems: impl IntoIterator<Item = Zq>) -> BigInt {
-        let v = izip_eq!(&self.q_hats, &self.q_hats_inv_qs, rems)
-            .map(|(qi_hat, qi_hat_inv, rem)| qi_hat * qi_hat_inv * rem.to_u64())
+    fn reconstruct(&self, vqs: impl IntoIterator<Item = Zq>) -> BigInt {
+        let v = izip_eq!(&self.q_hats, &self.q_hats_inv_qs, vqs)
+            .map(|(qi_hat, qi_hat_inv, vqi)| qi_hat * qi_hat_inv * vqi.to_u64())
             .sum::<BigUint>();
         v.centering_rem(&self.q)
     }
@@ -356,48 +356,6 @@ impl CenteringRem<&BigUint> for &BigUint {
         } else {
             value.to_bigint().unwrap() - rhs.to_bigint().unwrap()
         }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RnsDecomposor {
-    d_num: usize,
-    bases: Vec<BigUint>,
-}
-
-impl RnsDecomposor {
-    pub fn new(qs: &[u64], d_num: usize) -> Self {
-        let bases = {
-            let big_q = &qs.iter().product::<BigUint>();
-            qs.chunks(d_num)
-                .map(|qs| {
-                    let big_q_j = &qs.iter().product::<BigUint>();
-                    let big_q_hat_j = &(big_q / big_q_j);
-                    big_q_hat_j * big_q_hat_j.modinv(big_q_j).unwrap()
-                })
-                .collect()
-        };
-        Self { d_num, bases }
-    }
-
-    pub fn d_num(&self) -> usize {
-        self.d_num
-    }
-
-    pub fn power_up(&self, v: RnsRq) -> impl Iterator<Item = RnsRq> + '_ {
-        self.bases.iter().map(move |bi| &v * bi)
-    }
-
-    pub fn decompose<'a>(&self, v: &'a RnsRq) -> impl Iterator<Item = RnsRq> + 'a {
-        let qs = v.qs();
-        izip!((0..).step_by(self.d_num()), v.0.chunks(self.d_num())).map(move |(j, limb)| {
-            let limb = RnsRq(limb.into());
-            let k = limb.qs().len();
-            let ps = [&qs[..j], &qs[j + k..]].concat();
-            let mut limb = limb.extend_bases(&ps);
-            limb.0[..(j + k)].rotate_left(k);
-            limb
-        })
     }
 }
 

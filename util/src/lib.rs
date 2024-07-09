@@ -13,8 +13,5 @@ pub use misc::{
     horner, powers, Dot,
 };
 pub use num_bigint::{BigInt, BigUint};
-pub use poly::{
-    rns::{RnsDecomposor, RnsRq},
-    NegaCyclicPoly, Rq, X,
-};
+pub use poly::{rns::RnsRq, NegaCyclicPoly, Rq, X};
 pub use zq::{two_adic_primes, Zq};
