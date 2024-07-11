@@ -4,6 +4,7 @@ use crate::{
         impl_mul_assign_element, impl_mul_element, AVec,
     },
     izip_eq,
+    misc::Butterfly,
     zq::{impl_rest_op_by_op_assign_ref, twiddle, Zq},
 };
 use core::{
@@ -371,16 +372,15 @@ fn nega_cyclic_ntt_mul_assign(
 // Algorithm 1 in 2016/504.
 fn nega_cyclic_ntt_in_place(a: &mut [Zq], psi: &[Zq]) {
     assert!(a.len().is_power_of_two());
-
     for log_m in 0..a.len().ilog2() {
         let m = 1 << log_m;
         let t = a.len() / m;
         izip!(0.., a.chunks_exact_mut(t), &psi[m..]).for_each(|(i, a, psi)| {
             let (u, v) = a.split_at_mut(t / 2);
             if m == 0 && i == 0 {
-                izip!(u, v).for_each(|(u, v)| twiddle_free_bufferfly(u, v));
+                izip!(u, v).for_each(|(u, v)| Butterfly::twiddle_free(u, v));
             } else {
-                izip!(u, v).for_each(|(u, v)| dit_bufferfly(u, v, psi));
+                izip!(u, v).for_each(|(u, v)| Butterfly::dit(u, v, psi));
             }
         });
     }
@@ -389,47 +389,20 @@ fn nega_cyclic_ntt_in_place(a: &mut [Zq], psi: &[Zq]) {
 // Algorithm 2 in 2016/504.
 fn nega_cyclic_intt_in_place(a: &mut [Zq], psi_inv: &[Zq]) {
     assert!(a.len().is_power_of_two());
-
     for log_m in (0..a.len().ilog2()).rev() {
         let m = 1 << log_m;
         let t = a.len() / m;
         izip!(0.., a.chunks_exact_mut(t), &psi_inv[m..]).for_each(|(i, a, psi_inv)| {
             let (u, v) = a.split_at_mut(t / 2);
             if m == 0 && i == 0 {
-                izip!(u, v).for_each(|(u, v)| twiddle_free_bufferfly(u, v));
+                izip!(u, v).for_each(|(u, v)| Butterfly::twiddle_free(u, v));
             } else {
-                izip!(u, v).for_each(|(u, v)| dif_bufferfly(u, v, psi_inv));
+                izip!(u, v).for_each(|(u, v)| Butterfly::dif(u, v, psi_inv));
             }
         });
     }
-
     let n_inv = Zq::from_u64(a[0].q(), a.len() as u64).inv().unwrap();
     a.iter_mut().for_each(|a| *a *= n_inv);
-}
-
-#[inline(always)]
-fn dit_bufferfly(a: &mut Zq, b: &mut Zq, twiddle: &Zq) {
-    let tb = twiddle * *b;
-    let c = *a + tb;
-    let d = *a - tb;
-    *a = c;
-    *b = d;
-}
-
-#[inline(always)]
-fn dif_bufferfly(a: &mut Zq, b: &mut Zq, twiddle: &Zq) {
-    let c = *a + *b;
-    let d = (*a - *b) * twiddle;
-    *a = c;
-    *b = d;
-}
-
-#[inline(always)]
-fn twiddle_free_bufferfly(a: &mut Zq, b: &mut Zq) {
-    let c = *a + *b;
-    let d = *a - *b;
-    *a = c;
-    *b = d;
 }
 
 #[cfg(test)]

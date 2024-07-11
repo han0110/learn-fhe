@@ -1,16 +1,21 @@
 use crate::{
+    avec::AVec,
     izip_eq,
-    poly::{Basis, Coefficient, Evaluation},
+    misc::Dot,
+    poly::{Basis, Coefficient, Evaluation, Rq},
     zipstar,
-    zq::impl_rest_op_by_op_assign_ref,
-    AVec, Dot, Rq, Zq,
+    zq::{impl_rest_op_by_op_assign_ref, Zq},
 };
-use core::{borrow::Borrow, iter::Sum, ops::MulAssign};
+use core::{
+    borrow::Borrow,
+    iter::Sum,
+    ops::{AddAssign, MulAssign},
+};
 use itertools::{chain, Itertools};
 use num_bigint::{BigInt, BigUint, ToBigInt};
 use num_traits::ToPrimitive;
 use rand::{distributions::Distribution, RngCore};
-use std::{collections::HashSet, ops::AddAssign};
+use std::collections::HashSet;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RnsRq<B: Basis = Coefficient>(AVec<Rq<B>>);

@@ -1,4 +1,4 @@
-use crate::Zq;
+use crate::zq::Zq;
 use core::{iter::repeat_with, ops::Mul};
 use itertools::Itertools;
 

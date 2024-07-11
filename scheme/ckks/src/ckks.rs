@@ -1,9 +1,9 @@
+use crate::sfft::{sfft, sifft};
 use derive_more::{Add, Deref, Sub};
 use itertools::{chain, izip, Itertools};
 use rand::RngCore;
 use util::{
-    bit_reverse, dg, powers, two_adic_primes, zo, AVec, BigFloat, BigInt, BigUint, Complex,
-    NegaCyclicPoly, RnsRq, Zq,
+    dg, two_adic_primes, zo, AVec, BigFloat, BigInt, BigUint, Complex, NegaCyclicPoly, RnsRq, Zq,
 };
 
 #[derive(Clone, Debug)]
@@ -12,8 +12,6 @@ pub struct Ckks;
 #[derive(Clone, Debug)]
 pub struct CkksParam {
     log_n: usize,
-    pow5: Vec<usize>,
-    psi: Vec<Complex>,
     qs: Vec<u64>,
     ps: Vec<u64>,
     scale: BigFloat,
@@ -24,29 +22,13 @@ impl CkksParam {
         assert!(log_n >= 1);
         assert!(big_l > 1);
 
-        let n = 1 << log_n;
-
-        let psi = {
-            let phase = BigFloat::pi() / BigFloat::from(n);
-            let cis = Complex::new(phase.cos(), phase.sin());
-            powers(&cis).take(2 * n).collect()
-        };
-
-        let pow5 = {
-            let five = Zq::from_u64(2 * n as u64, 5);
-            five.powers().take(n / 2).map_into().collect()
-        };
-
         let mut primes = two_adic_primes(log_qi, log_n + 1);
         let qs = primes.by_ref().take(big_l).collect_vec();
         let ps = primes.by_ref().take(big_l).collect_vec();
-
         let scale = BigFloat::from(*qs.last().unwrap());
 
         Self {
             log_n,
-            psi,
-            pow5,
             qs,
             ps,
             scale,
@@ -65,12 +47,8 @@ impl CkksParam {
         1 << (self.log_n - 1)
     }
 
-    pub fn psi(&self) -> &[Complex] {
-        &self.psi
-    }
-
-    pub fn pow5(&self) -> &[usize] {
-        &self.pow5
+    pub fn pow5(&self, j: usize) -> usize {
+        Zq::from_usize(2 * self.n() as u64, 5).pow(j).into()
     }
 
     pub fn qs(&self) -> &[u64] {
@@ -127,9 +105,6 @@ impl CkksRotKey {
         self.0
     }
 }
-
-#[derive(Clone, Debug)]
-pub struct CkksCleartext(AVec<Complex>);
 
 #[derive(Clone, Debug)]
 pub struct CkksPlaintext(RnsRq);
@@ -198,14 +173,14 @@ impl Ckks {
         rng: &mut impl RngCore,
     ) -> CkksRotKey {
         let j = j.rem_euclid(param.l() as _) as _;
-        let sk_rot = sk.automorphism(param.pow5()[j] as _);
+        let sk_rot = sk.automorphism(param.pow5(j) as _);
         CkksRotKey(j, Ckks::ksk_gen(param, sk, sk_rot, rng))
     }
 
-    pub fn encode(param: &CkksParam, CkksCleartext(m): CkksCleartext) -> CkksPlaintext {
+    pub fn encode(param: &CkksParam, m: AVec<Complex>) -> CkksPlaintext {
         assert_eq!(m.len(), param.l());
 
-        let z = special_ifft(param, m);
+        let z = sifft(m);
 
         let z_scaled = chain![z.iter().map(|z| &z.re), z.iter().map(|z| &z.im)]
             .map(|z| BigInt::from(z * param.scale()))
@@ -216,7 +191,7 @@ impl Ckks {
         CkksPlaintext(pt)
     }
 
-    pub fn decode(param: &CkksParam, CkksPlaintext(pt): CkksPlaintext) -> CkksCleartext {
+    pub fn decode(param: &CkksParam, CkksPlaintext(pt): CkksPlaintext) -> AVec<Complex> {
         assert_eq!(pt.n(), param.n());
 
         let z_scaled = pt.into_bigint();
@@ -228,9 +203,7 @@ impl Ckks {
             })
             .collect();
 
-        let m = special_fft(param, z);
-
-        CkksCleartext(m)
+        sfft(z)
     }
 
     pub fn sk_encrypt(
@@ -268,6 +241,11 @@ impl Ckks {
         CkksPlaintext(pt)
     }
 
+    pub fn mul_constant(param: &CkksParam, m: AVec<Complex>, ct: CkksCiphertext) -> CkksCiphertext {
+        let CkksPlaintext(pt) = &Ckks::encode(param, m);
+        CkksCiphertext(pt * ct.b(), pt * ct.a()).rescale()
+    }
+
     pub fn mul(
         param: &CkksParam,
         rlk: &CkksRelinKey,
@@ -293,7 +271,7 @@ impl Ckks {
     }
 
     pub fn rotate(param: &CkksParam, rtk: &CkksRotKey, ct: CkksCiphertext) -> CkksCiphertext {
-        let ct_rot = ct.automorphism(param.pow5()[rtk.j()] as i64);
+        let ct_rot = ct.automorphism(param.pow5(rtk.j()) as _);
         Ckks::key_switch(param, rtk, ct_rot)
     }
 
@@ -309,77 +287,12 @@ impl Ckks {
     }
 }
 
-// Algorithm 1 in 2018/1043
-fn special_fft(param: &CkksParam, mut w: AVec<Complex>) -> AVec<Complex> {
-    assert_eq!(w.len(), param.l());
-    let (pow5, psi) = (param.pow5(), param.psi());
-
-    bit_reverse(&mut w);
-
-    let l = w.len();
-    let mut m = 2;
-    while m <= l {
-        for i in (0..l).step_by(m) {
-            for j in 0..m / 2 {
-                let k = (pow5[j] % (4 * m)) * l / m;
-                let u = w[i + j].clone();
-                let v = &w[i + j + m / 2] * &psi[k];
-                w[i + j] = &u + &v;
-                w[i + j + m / 2] = &u - &v;
-            }
-        }
-        m *= 2;
-    }
-
-    w
-}
-
-fn special_ifft(param: &CkksParam, mut w: AVec<Complex>) -> AVec<Complex> {
-    assert_eq!(w.len(), param.l());
-    let (pow5, psi) = (param.pow5(), param.psi());
-
-    let l = w.len();
-    let mut m = l;
-    while m >= 2 {
-        for i in (0..l).step_by(m) {
-            for j in 0..m / 2 {
-                let k = (4 * m - pow5[j] % (4 * m)) * l / m;
-                let u = &w[i + j] + &w[i + j + m / 2];
-                let v = (&w[i + j] - &w[i + j + m / 2]) * &psi[k];
-                w[i + j] = u;
-                w[i + j + m / 2] = v;
-            }
-        }
-        m /= 2;
-    }
-
-    bit_reverse(&mut w);
-    w.iter_mut().for_each(|w| *w /= BigFloat::from(l));
-
-    w
-}
-
 #[cfg(test)]
 mod test {
-    use crate::ckks::{special_fft, special_ifft, Ckks, CkksCleartext, CkksParam};
+    use crate::ckks::{Ckks, CkksParam};
     use core::array::from_fn;
     use rand::{distributions::Standard, rngs::StdRng, Rng, SeedableRng};
-    use util::{assert_eq_complex, horner, izip_eq, vec_with, AVec, Complex};
-
-    #[test]
-    fn special_ifft_fft() {
-        let rng = &mut StdRng::from_entropy();
-        let (log_qi, big_l) = (55, 8);
-        for log_n in 1..10 {
-            let param = CkksParam::new(log_n, log_qi, big_l);
-            let evals = AVec::sample(param.l(), Standard, rng);
-            let coeffs = special_ifft(&param, evals.clone());
-            izip_eq!(param.pow5(), &evals)
-                .for_each(|(k, eval)| assert_eq_complex!(horner(&coeffs, &param.psi()[*k]), eval));
-            izip_eq!(evals, special_fft(&param, coeffs))
-                .for_each(|(a, b)| assert_eq_complex!(a, b));
-        }
-    }
+    use util::{assert_eq_complex, izip_eq, vec_with, AVec, Complex, HadamardMul};
 
     #[test]
     fn encrypt_decrypt() {
@@ -389,12 +302,12 @@ mod test {
             let param = CkksParam::new(log_n, log_qi, big_l);
             let (sk, pk) = Ckks::key_gen(&param, rng);
             let m = &AVec::sample(param.l(), Standard, rng);
-            let pt = Ckks::encode(&param, CkksCleartext(m.clone()));
+            let pt = Ckks::encode(&param, m.clone());
             let ct0 = Ckks::sk_encrypt(&param, &sk, pt.clone(), rng);
             let ct1 = Ckks::pk_encrypt(&param, &pk, pt.clone(), rng);
-            izip_eq!(m, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct0)).0)
+            izip_eq!(m, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct0)))
                 .for_each(|(lhs, rhs)| assert_eq_complex!(lhs, rhs, 40));
-            izip_eq!(m, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct1)).0)
+            izip_eq!(m, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct1)))
                 .for_each(|(lhs, rhs)| assert_eq_complex!(lhs, rhs, 40));
         }
     }
@@ -407,14 +320,33 @@ mod test {
             let param = CkksParam::new(log_n, log_qi, big_l);
             let (sk, pk) = Ckks::key_gen(&param, rng);
             let [m0, m1] = &from_fn(|_| AVec::<Complex>::sample(param.l(), Standard, rng));
-            let [pt0, pt1] = [m0, m1].map(|m| Ckks::encode(&param, CkksCleartext(m.clone())));
+            let [pt0, pt1] = [m0, m1].map(|m| Ckks::encode(&param, m.clone()));
             let [ct0, ct1] = [pt0, pt1].map(|pt| Ckks::pk_encrypt(&param, &pk, pt, rng));
             let (m2, ct2) = (m0 + m1, ct0.clone() + ct1.clone());
             let (m3, ct3) = (m0 - m1, ct0.clone() - ct1.clone());
-            izip_eq!(m2, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct2)).0)
+            izip_eq!(m2, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct2)))
                 .for_each(|(lhs, rhs)| assert_eq_complex!(lhs, rhs, 40));
-            izip_eq!(m3, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct3)).0)
+            izip_eq!(m3, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct3)))
                 .for_each(|(lhs, rhs)| assert_eq_complex!(lhs, rhs, 40));
+        }
+    }
+
+    #[test]
+    fn mul_constant() {
+        let rng = &mut StdRng::from_entropy();
+        let (log_qi, big_l) = (55, 8);
+        for log_n in 1..10 {
+            let param = CkksParam::new(log_n, log_qi, big_l);
+            let (sk, pk) = Ckks::key_gen(&param, rng);
+            let mul_m = |a, b| HadamardMul::hada_mul(&a, &b);
+            let mul_ct = |ct, m| Ckks::mul_constant(&param, m, ct);
+            let ms = vec_with![|| AVec::<Complex>::sample(param.l(), Standard, rng); big_l - 1];
+            let pt = Ckks::encode(&param, ms[0].clone());
+            let ct = Ckks::pk_encrypt(&param, &pk, pt, rng);
+            let m = ms.clone().into_iter().reduce(mul_m).unwrap();
+            let ct = ms.into_iter().skip(1).fold(ct, mul_ct);
+            izip_eq!(m, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct)))
+                .for_each(|(lhs, rhs)| assert_eq_complex!(lhs, rhs, 32));
         }
     }
 
@@ -426,14 +358,14 @@ mod test {
             let param = CkksParam::new(log_n, log_qi, big_l);
             let (sk, pk) = Ckks::key_gen(&param, rng);
             let rlk = Ckks::rlk_gen(&param, &sk, rng);
-            let mul_m = |m0, m1| AVec::ew_mul(&m0, &m1);
-            let mul_ct = |ct0, ct1| Ckks::mul(&param, &rlk, ct0, ct1);
+            let mul_m = |a, b| HadamardMul::hada_mul(&a, &b);
+            let mul_ct = |a, b| Ckks::mul(&param, &rlk, a, b);
             let ms = vec_with![|| AVec::<Complex>::sample(param.l(), Standard, rng); big_l - 1];
-            let pts = vec_with!(|m| Ckks::encode(&param, CkksCleartext(m.clone())); &ms);
-            let cts = vec_with!(|pt| Ckks::pk_encrypt(&param, &pk, pt, rng); pts);
+            let pts = vec_with![|m| Ckks::encode(&param, m.clone()); &ms];
+            let cts = vec_with![|pt| Ckks::pk_encrypt(&param, &pk, pt, rng); pts];
             let m = ms.into_iter().reduce(mul_m).unwrap();
             let ct = cts.into_iter().reduce(mul_ct).unwrap();
-            izip_eq!(m, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct)).0)
+            izip_eq!(m, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct)))
                 .for_each(|(lhs, rhs)| assert_eq_complex!(lhs, rhs, 32));
         }
     }
@@ -446,13 +378,13 @@ mod test {
             let param = CkksParam::new(log_n, log_qi, big_l);
             let (sk, pk) = Ckks::key_gen(&param, rng);
             let m0 = AVec::sample(param.l(), Standard, rng);
-            let pt0 = Ckks::encode(&param, CkksCleartext(m0.clone()));
+            let pt0 = Ckks::encode(&param, m0.clone());
             let ct0 = Ckks::pk_encrypt(&param, &pk, pt0, rng);
             for _ in 0..10 {
                 let rtk = Ckks::rtk_gen(&param, &sk, rng.gen(), rng);
-                let m1 = m0.clone().rotate(rtk.j() as _);
+                let m1 = m0.rot_iter(rtk.j() as _);
                 let ct1 = Ckks::rotate(&param, &rtk, ct0.clone());
-                izip_eq!(m1, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct1)).0)
+                izip_eq!(m1, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct1)))
                     .for_each(|(lhs, rhs)| assert_eq_complex!(lhs, rhs, 40));
             }
         }
@@ -468,10 +400,10 @@ mod test {
             let cjk = Ckks::cjk_gen(&param, &sk, rng);
             let m0 = AVec::sample(param.l(), Standard, rng);
             let m1 = m0.conjugate();
-            let pt0 = Ckks::encode(&param, CkksCleartext(m0));
+            let pt0 = Ckks::encode(&param, m0);
             let ct0 = Ckks::pk_encrypt(&param, &pk, pt0, rng);
             let ct1 = Ckks::conjugate(&param, &cjk, ct0);
-            izip_eq!(m1, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct1)).0)
+            izip_eq!(m1, Ckks::decode(&param, Ckks::decrypt(&param, &sk, ct1)))
                 .for_each(|(lhs, rhs)| assert_eq_complex!(lhs, rhs, 40));
         }
     }

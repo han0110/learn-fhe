@@ -1,27 +1,33 @@
-use crate::{float::Complex, izip_eq, zq::Zq};
+use crate::{float::Complex, zq::Zq};
 use core::{
     borrow::Borrow,
     fmt::{self, Display, Formatter},
-    iter::{repeat_with, Sum},
-    ops::{AddAssign, Mul, Neg},
+    iter::{repeat, repeat_with, Sum},
+    ops::{AddAssign, Neg},
     slice,
 };
-use derive_more::{Deref, DerefMut, From, Into};
+use derive_more::{AsMut, AsRef, Deref, DerefMut, From, Into};
+use itertools::chain;
 use rand::{distributions::Distribution, RngCore};
 use std::vec;
 
-#[derive(Clone, Debug, PartialEq, Eq, Deref, DerefMut, From, Into)]
+#[derive(Clone, Debug, PartialEq, Eq, Deref, DerefMut, From, Into, AsRef, AsMut)]
+#[as_ref(forward)]
+#[as_mut(forward)]
 pub struct AVec<T>(Vec<T>);
 
 impl<T> AVec<T> {
+    pub fn broadcast(n: usize, v: impl Clone + IntoIterator<Item = T>) -> Self {
+        repeat(v).flatten().take(n).collect()
+    }
+
     pub fn sample(n: usize, dist: impl Distribution<T>, rng: &mut impl RngCore) -> Self {
         repeat_with(|| dist.sample(rng)).take(n).collect()
     }
 
-    pub fn rotate(mut self, j: i64) -> Self {
-        let mid = j.rem_euclid(self.len() as _) as _;
-        self.rotate_left(mid);
-        self
+    pub fn rot_iter(&self, j: i64) -> impl Iterator<Item = &T> {
+        let (left, right) = self.split_at(j.rem_euclid(self.len() as _) as _);
+        chain![right, left]
     }
 }
 
@@ -40,15 +46,6 @@ impl<T: Clone + Neg<Output = T>> AVec<T> {
             }
         });
         v
-    }
-}
-
-impl<T> AVec<T>
-where
-    for<'t> &'t T: Mul<&'t T, Output = T>,
-{
-    pub fn ew_mul(&self, rhs: &Self) -> Self {
-        izip_eq!(self, rhs).map(|(lhs, rhs)| lhs * rhs).collect()
     }
 }
 

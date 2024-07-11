@@ -10,7 +10,9 @@ pub use misc::{
     bit_reverse,
     decompose::{Base2Decomposable, Base2Decomposor},
     distribution::{dg, zo},
-    horner, powers, Dot,
+    horner,
+    matrix::DiagSparseMatrix,
+    powers, Butterfly, Dot, HadamardMul,
 };
 pub use num_bigint::{BigInt, BigUint};
 pub use poly::{rns::RnsRq, NegaCyclicPoly, Rq, X};

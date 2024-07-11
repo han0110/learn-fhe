@@ -1,4 +1,4 @@
-use crate::bit_reverse;
+use crate::misc::bit_reverse;
 use core::{
     borrow::Borrow,
     cmp::Ordering,
@@ -104,6 +104,10 @@ impl Zq {
             .map(|g| Zq::from_u64(q, g))
             .find(|g| g.pow(order >> 1).v == order)
             .unwrap()
+    }
+
+    pub fn two_adic_generator(q: u64, log_n: usize) -> Self {
+        Self::generator(q).pow((q - 1) >> log_n)
     }
 
     pub fn pow(mut self, exp: impl ToBigUint) -> Self {
@@ -367,14 +371,11 @@ pub fn twiddle<'a>(q: u64) -> Twiddle<'a> {
 
 fn compute_twiddle(q: u64) -> [Vec<Zq>; 2] {
     let order = q - 1;
-    let s = order.trailing_zeros();
-    let twiddle = {
-        let g = Zq::generator(q);
-        let rou = g.pow(order >> s);
-        let mut twiddle = rou.powers().take(1 << (s - 1)).collect_vec();
-        bit_reverse(&mut twiddle);
-        twiddle
-    };
+    let s = order.trailing_zeros() as _;
+    let twiddle = Zq::two_adic_generator(q, s)
+        .powers()
+        .take(1 << (s - 1))
+        .collect_vec();
     let twiddle_inv = twiddle.iter().map(|v| v.inv().unwrap()).collect();
-    [twiddle, twiddle_inv]
+    [bit_reverse(twiddle), bit_reverse(twiddle_inv)]
 }
