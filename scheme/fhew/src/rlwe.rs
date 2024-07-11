@@ -125,6 +125,7 @@ impl Rlwe {
         sk: &RlweSecretKey,
         rng: &mut impl RngCore,
     ) -> RlweAutoKey {
+        assert_ne!(t, 0);
         let sk_auto = sk.automorphism(t);
         let ksk = Rlwe::ksk_gen(param, sk, &sk_auto, rng);
         RlweAutoKey(t, ksk)

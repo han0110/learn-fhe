@@ -1,4 +1,5 @@
 use crate::sfft::{sfft, sifft};
+use core::{iter::Sum, ops::Add};
 use derive_more::{Add, Deref, Sub};
 use itertools::{chain, izip, Itertools};
 use rand::RngCore;
@@ -130,6 +131,12 @@ impl CkksCiphertext {
     }
 }
 
+impl Sum for CkksCiphertext {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.reduce(Add::add).unwrap()
+    }
+}
+
 impl Ckks {
     pub fn sk_gen(param: &CkksParam, rng: &mut impl RngCore) -> CkksSecretKey {
         CkksSecretKey(AVec::sample(param.n(), zo(0.5), rng))
@@ -172,6 +179,7 @@ impl Ckks {
         j: i64,
         rng: &mut impl RngCore,
     ) -> CkksRotKey {
+        assert_ne!(j, 0);
         let j = j.rem_euclid(param.l() as _) as _;
         let sk_rot = sk.automorphism(param.pow5(j) as _);
         CkksRotKey(j, Ckks::ksk_gen(param, sk, sk_rot, rng))

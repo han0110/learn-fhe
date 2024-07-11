@@ -71,7 +71,8 @@ fn w<'a>(n: usize) -> W<'a> {
     W(guard, n, false)
 }
 
-pub(crate) fn sfft_factors(n: usize) -> Vec<DiagSparseMatrix<Complex>> {
+// V_0 in 2018/1073
+pub(crate) fn sfft_fmats(n: usize) -> Vec<DiagSparseMatrix<Complex>> {
     assert!(n.is_power_of_two());
     let log_n = n.ilog2();
     (0..log_n)
@@ -92,13 +93,14 @@ pub(crate) fn sfft_factors(n: usize) -> Vec<DiagSparseMatrix<Complex>> {
         .collect()
 }
 
-pub(crate) fn sifft_factors(n: usize) -> Vec<DiagSparseMatrix<Complex>> {
-    sfft_factors(n).iter().rev().map(|mat| mat.inv()).collect()
+// V_0^-1 in 2018/1073
+pub(crate) fn sifft_fmats(n: usize) -> Vec<DiagSparseMatrix<Complex>> {
+    sfft_fmats(n).iter().rev().map(|mat| mat.inv()).collect()
 }
 
 #[cfg(test)]
 mod test {
-    use crate::sfft::{sfft, sfft_factors, sifft, w};
+    use crate::sfft::{sfft, sfft_fmats, sifft, w};
     use itertools::{chain, izip, Itertools};
     use rand::{distributions::Standard, rngs::StdRng, SeedableRng};
     use util::{
@@ -120,10 +122,10 @@ mod test {
     }
 
     #[test]
-    fn sfft_factorization() {
+    fn sfft_mat_factorization() {
         for log_n in 1..10 {
             let n = 1 << log_n;
-            let lhs = sfft_factors(n).into_iter().product::<DiagSparseMatrix<_>>();
+            let lhs = sfft_fmats(n).into_iter().product::<DiagSparseMatrix<_>>();
             let rhs = vec_with![|t| bit_reverse(powers(t).take(n).collect_vec()); w(n).iter()];
             izip!(lhs.to_dense(), rhs).for_each(|(lhs, rhs)| {
                 izip!(lhs, rhs).for_each(|(lhs, rhs)| assert_eq_complex!(lhs, rhs))

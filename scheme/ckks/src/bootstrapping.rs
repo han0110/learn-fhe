@@ -1,12 +1,11 @@
 use crate::{
     ckks::{Ckks, CkksCiphertext, CkksParam, CkksRotKey, CkksSecretKey},
-    sfft::{sfft_factors, sifft_factors},
+    sfft::{sfft_fmats, sifft_fmats},
 };
-use core::ops::Add;
 use derive_more::Deref;
-use itertools::{chain, Itertools};
+use itertools::{chain, izip, Itertools};
 use rand::RngCore;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, iter::repeat};
 use util::{vec_with, Complex, DiagSparseMatrix};
 
 #[derive(Debug)]
@@ -16,27 +15,27 @@ pub struct Bootstrapping;
 pub struct BootstrappingParam {
     #[deref]
     param: CkksParam,
-    sfft_factors: Vec<DiagSparseMatrix<Complex>>,
-    sifft_factors: Vec<DiagSparseMatrix<Complex>>,
+    sfft_fmats: Vec<DiagSparseMatrix<Complex>>,
+    sifft_fmats: Vec<DiagSparseMatrix<Complex>>,
 }
 
 impl BootstrappingParam {
     pub fn new(param: CkksParam, r: usize) -> Self {
-        let [sfft_factors, sifft_factors] = [sfft_factors, sifft_factors]
-            .map(|f| vec_with![|factors| factors.iter().product(); f(param.l()).chunks(r)]);
+        let [sfft_fmats, sifft_fmats] = [sfft_fmats, sifft_fmats]
+            .map(|f| vec_with![|mats| mats.iter().product(); f(param.l()).chunks(r)]);
         Self {
             param,
-            sfft_factors,
-            sifft_factors,
+            sfft_fmats,
+            sifft_fmats,
         }
     }
 
-    pub fn sfft_factors(&self) -> &[DiagSparseMatrix<Complex>] {
-        &self.sfft_factors
+    pub fn sfft_fmats(&self) -> &[DiagSparseMatrix<Complex>] {
+        &self.sfft_fmats
     }
 
-    pub fn sifft_factors(&self) -> &[DiagSparseMatrix<Complex>] {
-        &self.sifft_factors
+    pub fn sifft_fmats(&self) -> &[DiagSparseMatrix<Complex>] {
+        &self.sifft_fmats
     }
 }
 
@@ -59,14 +58,12 @@ impl Bootstrapping {
         sk: &CkksSecretKey,
         rng: &mut impl RngCore,
     ) -> BootstrappingKey {
-        let rtk = {
-            let js = chain![param.sfft_factors(), param.sifft_factors()]
-                .flat_map(DiagSparseMatrix::diags)
-                .filter_map(|(j, _)| (j != 0).then_some(j))
-                .unique();
-            js.map(|j| (j, Ckks::rtk_gen(param, sk, j as _, rng)))
-                .collect()
-        };
+        let rtk = chain![param.sfft_fmats(), param.sifft_fmats()]
+            .flat_map(|mat| mat.bsgs().ijs())
+            .filter(|j| *j != 0)
+            .unique()
+            .map(|j| (j, Ckks::rtk_gen(param, sk, j as _, rng)))
+            .collect();
         BootstrappingKey {
             param: param.clone(),
             rtk,
@@ -74,29 +71,40 @@ impl Bootstrapping {
     }
 
     pub fn slot_to_coeff(bk: &BootstrappingKey, ct: CkksCiphertext) -> CkksCiphertext {
-        Bootstrapping::mul_mat(bk, bk.sfft_factors(), ct)
+        Self::mul_mats(bk, bk.sfft_fmats(), ct)
     }
 
     pub fn coeff_to_slot(bk: &BootstrappingKey, ct: CkksCiphertext) -> CkksCiphertext {
-        Bootstrapping::mul_mat(bk, bk.sifft_factors(), ct)
+        Self::mul_mats(bk, bk.sifft_fmats(), ct)
+    }
+
+    fn mul_mats(
+        bk: &BootstrappingKey,
+        mats: &[DiagSparseMatrix<Complex>],
+        ct: CkksCiphertext,
+    ) -> CkksCiphertext {
+        let mul_mat = |ct, mat| Self::mul_mat(bk, mat, ct);
+        mats.iter().rev().fold(ct, mul_mat)
     }
 
     fn mul_mat(
         bk: &BootstrappingKey,
-        factors: &[DiagSparseMatrix<Complex>],
+        mat: &DiagSparseMatrix<Complex>,
         ct: CkksCiphertext,
     ) -> CkksCiphertext {
-        let rot = |ct, j| match j {
+        let rotate = |j, ct| match j {
             0 => ct,
             _ => Ckks::rotate(bk, bk.rtk(j), ct),
         };
-        factors.iter().rev().fold(ct, |ct, factor| {
-            factor
-                .diags()
-                .map(|(j, diag)| Ckks::mul_constant(bk, diag.clone(), rot(ct.clone(), j)))
-                .reduce(Add::add)
-                .unwrap()
-        })
+        let bsgs = mat.bsgs();
+        let ct_rot = BTreeMap::from_iter(bsgs.js().map(|j| (j, rotate(j, ct.clone()))));
+        let diag_rot = |i, j| mat.diag(i + j).rot_iter(-(i as i64)).cloned().collect();
+        let baby_step = |(i, j)| Ckks::mul_constant(bk, diag_rot(i, j), ct_rot[&j].clone());
+        let giant_step = |(i, ct)| rotate(i, ct);
+        bsgs.into_iter()
+            .map(|(i, js)| (i, izip!(repeat(i), js).map(baby_step).sum()))
+            .map(giant_step)
+            .sum()
     }
 }
 
@@ -113,7 +121,7 @@ mod test {
     #[test]
     fn coeff_to_slot_to_coeff() {
         let rng = &mut StdRng::from_entropy();
-        let (log_qi, big_l, r) = (55, 16, 3);
+        let (log_qi, big_l, r) = (55, 8, 3);
         for log_n in 1..10 {
             let param = BootstrappingParam::new(CkksParam::new(log_n, log_qi, big_l), r);
             let (sk, pk) = Ckks::key_gen(&param, rng);
