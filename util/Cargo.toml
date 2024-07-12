@@ -5,8 +5,8 @@ edition = "2021"
 
 [dependencies]
 astro-float = { workspace = true }
-itertools = { workspace = true }
 derive_more = { workspace = true }
+itertools = { workspace = true }
 num-bigint = { workspace = true }
 num-bigint-dig = { workspace = true }
 num-complex = { workspace = true, features = ["rand"] }

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-util = { path = "../../util" }
 derive_more = { workspace = true }
 itertools = { workspace = true }
 rand = { workspace = true }
+util = { path = "../../util" }
