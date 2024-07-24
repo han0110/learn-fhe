@@ -1,7 +1,7 @@
 use crate::{
     avec::AVec,
     misc::bit_reverse,
-    poly::fft::{nega_cyclic_fft_in_place, nega_cyclic_ifft_in_place},
+    ring::fft::{nega_cyclic_fft_in_place, nega_cyclic_ifft_in_place},
     zq::{is_prime, Zq},
 };
 use core::ops::Deref;
@@ -70,7 +70,7 @@ fn compute_twiddle(q: u64) -> [Vec<Zq>; 2] {
 mod test {
     use crate::{
         avec::AVec,
-        poly::{
+        ring::{
             fft::zq::{nega_cyclic_intt_in_place, nega_cyclic_ntt, nega_cyclic_ntt_mul_assign},
             nega_cyclic_schoolbook_mul,
         },

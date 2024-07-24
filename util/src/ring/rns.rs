@@ -2,7 +2,7 @@ use crate::{
     avec::AVec,
     izip_eq,
     misc::Dot,
-    poly::{Basis, Coefficient, Evaluation, Rq},
+    ring::{Basis, Coefficient, Evaluation, Rq},
     zipstar,
     zq::{impl_rest_op_by_op_assign_ref, Zq},
 };

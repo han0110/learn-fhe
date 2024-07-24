@@ -2,7 +2,7 @@ use crate::{
     avec::AVec,
     complex::C64,
     misc::bit_reverse,
-    poly::fft::{nega_cyclic_fft_in_place, nega_cyclic_ifft_in_place},
+    ring::fft::{nega_cyclic_fft_in_place, nega_cyclic_ifft_in_place},
     zq::Zq,
 };
 use core::f64::consts::PI;
@@ -60,7 +60,7 @@ mod test {
     use crate::{
         avec::AVec,
         complex::C64,
-        poly::{
+        ring::{
             fft::c64::{
                 nega_cyclic_fft64_in_place, nega_cyclic_fft64_mul_assign,
                 nega_cyclic_ifft64_in_place, zq_to_c64,

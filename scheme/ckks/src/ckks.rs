@@ -3,7 +3,7 @@ use core::{iter::Sum, ops::Add};
 use derive_more::{Add, Deref, Sub};
 use itertools::{chain, izip, Itertools};
 use rand::RngCore;
-use util::{dg, two_adic_primes, zo, AVec, BigInt, BigUint, NegaCyclicPoly, RnsRq, Zq, C256, F256};
+use util::{dg, two_adic_primes, zo, AVec, BigInt, BigUint, NegaCyclicRing, RnsRq, Zq, C256, F256};
 
 #[derive(Clone, Debug)]
 pub struct Ckks;
@@ -76,7 +76,7 @@ pub struct CkksSecretKey(AVec<i64>);
 
 impl CkksSecretKey {
     fn square(&self) -> Self {
-        Self(NegaCyclicPoly::from(self.0.clone()).square().into())
+        Self(NegaCyclicRing::from(self.0.clone()).square().into())
     }
 
     fn automorphism(&self, t: i64) -> Self {

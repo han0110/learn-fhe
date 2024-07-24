@@ -1,7 +1,7 @@
 mod avec;
 mod complex;
 mod misc;
-mod poly;
+mod ring;
 mod zq;
 
 pub use avec::AVec;
@@ -15,5 +15,5 @@ pub use misc::{
     powers, Dot, HadamardMul,
 };
 pub use num_bigint::{BigInt, BigUint};
-pub use poly::{fft::Butterfly, rns::RnsRq, NegaCyclicPoly, Rq, X};
+pub use ring::{fft::Butterfly, rns::RnsRq, NegaCyclicRing, Rq, X};
 pub use zq::{two_adic_primes, Zq};

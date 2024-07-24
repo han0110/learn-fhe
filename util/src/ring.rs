@@ -4,7 +4,7 @@ use crate::{
         impl_mul_assign_element, impl_mul_element, AVec,
     },
     izip_eq,
-    poly::fft::zq::{
+    ring::fft::zq::{
         nega_cyclic_intt_in_place, nega_cyclic_ntt_in_place, nega_cyclic_ntt_mul_assign,
     },
     zq::{impl_rest_op_by_op_assign_ref, is_prime, Zq},
@@ -38,10 +38,10 @@ pub struct Evaluation;
 
 impl Basis for Evaluation {}
 
-pub type Rq<B = Coefficient> = NegaCyclicPoly<Zq, B>;
+pub type Rq<B = Coefficient> = NegaCyclicRing<Zq, B>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deref, DerefMut, AsRef, AsMut)]
-pub struct NegaCyclicPoly<T, B: Basis = Coefficient>(
+pub struct NegaCyclicRing<T, B: Basis = Coefficient>(
     #[deref]
     #[deref_mut]
     #[as_ref(forward)]
@@ -50,7 +50,7 @@ pub struct NegaCyclicPoly<T, B: Basis = Coefficient>(
     PhantomData<B>,
 );
 
-impl<T, B: Basis> NegaCyclicPoly<T, B> {
+impl<T, B: Basis> NegaCyclicRing<T, B> {
     fn new(v: AVec<T>) -> Self {
         assert!(v.len().is_power_of_two());
         Self(v, PhantomData)
@@ -72,13 +72,13 @@ impl<T, B: Basis> NegaCyclicPoly<T, B> {
     }
 }
 
-impl<T: Copy + Neg<Output = T>> NegaCyclicPoly<T, Coefficient> {
+impl<T: Copy + Neg<Output = T>> NegaCyclicRing<T, Coefficient> {
     pub fn automorphism(&self, t: i64) -> Self {
         Self::new(self.0.automorphism(t))
     }
 }
 
-impl<B: Basis> NegaCyclicPoly<Zq, B> {
+impl<B: Basis> NegaCyclicRing<Zq, B> {
     pub fn zero(q: u64, n: usize) -> Self {
         Self::new(vec![Zq::from_u64(q, 0); n].into())
     }
@@ -104,7 +104,7 @@ impl<B: Basis> NegaCyclicPoly<Zq, B> {
     }
 }
 
-impl NegaCyclicPoly<Zq, Coefficient> {
+impl NegaCyclicRing<Zq, Coefficient> {
     pub fn one(q: u64, n: usize) -> Self {
         let mut poly = Self::zero(q, n);
         poly[0] += 1;
@@ -130,64 +130,64 @@ impl NegaCyclicPoly<Zq, Coefficient> {
         Self::new(v.iter().map(|v| Zq::from_i64(q, *v)).collect())
     }
 
-    pub fn to_evaluation(&self) -> NegaCyclicPoly<Zq, Evaluation> {
+    pub fn to_evaluation(&self) -> NegaCyclicRing<Zq, Evaluation> {
         let mut a = self.0.clone();
         nega_cyclic_ntt_in_place(&mut a);
-        NegaCyclicPoly::new(a)
+        NegaCyclicRing::new(a)
     }
 }
 
-impl NegaCyclicPoly<Zq, Evaluation> {
-    pub fn to_coefficient(&self) -> NegaCyclicPoly<Zq, Coefficient> {
+impl NegaCyclicRing<Zq, Evaluation> {
+    pub fn to_coefficient(&self) -> NegaCyclicRing<Zq, Coefficient> {
         let mut a = self.0.clone();
         nega_cyclic_intt_in_place(&mut a);
-        NegaCyclicPoly::new(a)
+        NegaCyclicRing::new(a)
     }
 }
 
-impl<T: Display> Display for NegaCyclicPoly<T> {
+impl<T: Display> Display for NegaCyclicRing<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl<T> From<NegaCyclicPoly<T>> for Vec<T> {
-    fn from(value: NegaCyclicPoly<T>) -> Self {
+impl<T> From<NegaCyclicRing<T>> for Vec<T> {
+    fn from(value: NegaCyclicRing<T>) -> Self {
         value.0.into()
     }
 }
 
-impl<T> From<Vec<T>> for NegaCyclicPoly<T> {
+impl<T> From<Vec<T>> for NegaCyclicRing<T> {
     fn from(value: Vec<T>) -> Self {
         Self::new(value.into())
     }
 }
 
-impl<T: Clone> From<&[T]> for NegaCyclicPoly<T> {
+impl<T: Clone> From<&[T]> for NegaCyclicRing<T> {
     fn from(value: &[T]) -> Self {
         Self::new(value.into())
     }
 }
 
-impl<T> From<NegaCyclicPoly<T>> for AVec<T> {
-    fn from(value: NegaCyclicPoly<T>) -> Self {
+impl<T> From<NegaCyclicRing<T>> for AVec<T> {
+    fn from(value: NegaCyclicRing<T>) -> Self {
         value.0
     }
 }
 
-impl<T> From<AVec<T>> for NegaCyclicPoly<T> {
+impl<T> From<AVec<T>> for NegaCyclicRing<T> {
     fn from(value: AVec<T>) -> Self {
         Self::new(value)
     }
 }
 
-impl<T, B: Basis> FromIterator<T> for NegaCyclicPoly<T, B> {
+impl<T, B: Basis> FromIterator<T> for NegaCyclicRing<T, B> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect())
     }
 }
 
-impl<T, B: Basis> IntoIterator for NegaCyclicPoly<T, B> {
+impl<T, B: Basis> IntoIterator for NegaCyclicRing<T, B> {
     type Item = T;
     type IntoIter = vec::IntoIter<T>;
 
@@ -196,7 +196,7 @@ impl<T, B: Basis> IntoIterator for NegaCyclicPoly<T, B> {
     }
 }
 
-impl<'a, T, B: Basis> IntoIterator for &'a NegaCyclicPoly<T, B> {
+impl<'a, T, B: Basis> IntoIterator for &'a NegaCyclicRing<T, B> {
     type Item = &'a T;
     type IntoIter = slice::Iter<'a, T>;
 
@@ -205,7 +205,7 @@ impl<'a, T, B: Basis> IntoIterator for &'a NegaCyclicPoly<T, B> {
     }
 }
 
-impl<'a, T, B: Basis> IntoIterator for &'a mut NegaCyclicPoly<T, B> {
+impl<'a, T, B: Basis> IntoIterator for &'a mut NegaCyclicRing<T, B> {
     type Item = &'a mut T;
     type IntoIter = slice::IterMut<'a, T>;
 
@@ -214,8 +214,8 @@ impl<'a, T, B: Basis> IntoIterator for &'a mut NegaCyclicPoly<T, B> {
     }
 }
 
-impl MulAssign<&NegaCyclicPoly<Zq, Coefficient>> for NegaCyclicPoly<Zq, Coefficient> {
-    fn mul_assign(&mut self, rhs: &NegaCyclicPoly<Zq, Coefficient>) {
+impl MulAssign<&NegaCyclicRing<Zq, Coefficient>> for NegaCyclicRing<Zq, Coefficient> {
+    fn mul_assign(&mut self, rhs: &NegaCyclicRing<Zq, Coefficient>) {
         assert_eq!(self.n(), rhs.n());
         match is_prime(self.q()) {
             true => nega_cyclic_ntt_mul_assign(self, rhs),
@@ -224,31 +224,31 @@ impl MulAssign<&NegaCyclicPoly<Zq, Coefficient>> for NegaCyclicPoly<Zq, Coeffici
     }
 }
 
-impl MulAssign<&NegaCyclicPoly<Zq, Evaluation>> for NegaCyclicPoly<Zq, Evaluation> {
-    fn mul_assign(&mut self, rhs: &NegaCyclicPoly<Zq, Evaluation>) {
+impl MulAssign<&NegaCyclicRing<Zq, Evaluation>> for NegaCyclicRing<Zq, Evaluation> {
+    fn mul_assign(&mut self, rhs: &NegaCyclicRing<Zq, Evaluation>) {
         izip_eq!(self, rhs).for_each(|(lhs, rhs)| *lhs *= rhs);
     }
 }
 
-impl MulAssign<&AVec<i64>> for NegaCyclicPoly<Zq, Coefficient> {
+impl MulAssign<&AVec<i64>> for NegaCyclicRing<Zq, Coefficient> {
     fn mul_assign(&mut self, rhs: &AVec<i64>) {
         *self *= Self::from_i64(self.q(), rhs);
     }
 }
 
-impl MulAssign<&AVec<i64>> for NegaCyclicPoly<Zq, Evaluation> {
+impl MulAssign<&AVec<i64>> for NegaCyclicRing<Zq, Evaluation> {
     fn mul_assign(&mut self, rhs: &AVec<i64>) {
-        *self *= NegaCyclicPoly::from_i64(self.q(), rhs).to_evaluation();
+        *self *= NegaCyclicRing::from_i64(self.q(), rhs).to_evaluation();
     }
 }
 
-impl MulAssign<&NegaCyclicPoly<i64, Coefficient>> for NegaCyclicPoly<i64, Coefficient> {
-    fn mul_assign(&mut self, rhs: &NegaCyclicPoly<i64, Coefficient>) {
+impl MulAssign<&NegaCyclicRing<i64, Coefficient>> for NegaCyclicRing<i64, Coefficient> {
+    fn mul_assign(&mut self, rhs: &NegaCyclicRing<i64, Coefficient>) {
         *self = nega_cyclic_schoolbook_mul(self, rhs);
     }
 }
 
-impl<B: Basis> MulAssign<&BigUint> for NegaCyclicPoly<Zq, B>
+impl<B: Basis> MulAssign<&BigUint> for NegaCyclicRing<Zq, B>
 where
     Self: MulAssign<Zq>,
 {
@@ -257,7 +257,7 @@ where
     }
 }
 
-impl MulAssign<&Monomial> for NegaCyclicPoly<Zq> {
+impl MulAssign<&Monomial> for NegaCyclicRing<Zq> {
     fn mul_assign(&mut self, rhs: &Monomial) {
         let n = self.n();
         let i = rhs.0.rem_euclid(2 * n as i64) as usize;
@@ -270,11 +270,11 @@ impl MulAssign<&Monomial> for NegaCyclicPoly<Zq> {
     }
 }
 
-impl<T, B, Item> Sum<Item> for NegaCyclicPoly<T, B>
+impl<T, B, Item> Sum<Item> for NegaCyclicRing<T, B>
 where
     T: Clone + for<'t> AddAssign<&'t T>,
     B: Basis,
-    Item: Borrow<NegaCyclicPoly<T, B>>,
+    Item: Borrow<NegaCyclicRing<T, B>>,
 {
     fn sum<I: Iterator<Item = Item>>(mut iter: I) -> Self {
         let init = iter.next().unwrap().borrow().0.clone();
@@ -286,36 +286,36 @@ where
 }
 
 impl_element_wise_neg!(
-    impl<T> Neg for NegaCyclicPoly<T, Coefficient>,
-    impl<T> Neg for NegaCyclicPoly<T, Evaluation>,
+    impl<T> Neg for NegaCyclicRing<T, Coefficient>,
+    impl<T> Neg for NegaCyclicRing<T, Evaluation>,
 );
 impl_element_wise_op_assign!(
-    impl<T> AddAssign<NegaCyclicPoly<T, Coefficient>> for NegaCyclicPoly<T, Coefficient>,
-    impl<T> AddAssign<NegaCyclicPoly<T, Evaluation>> for NegaCyclicPoly<T, Evaluation>,
-    impl<T> SubAssign<NegaCyclicPoly<T, Coefficient>> for NegaCyclicPoly<T, Coefficient>,
-    impl<T> SubAssign<NegaCyclicPoly<T, Evaluation>> for NegaCyclicPoly<T, Evaluation>,
+    impl<T> AddAssign<NegaCyclicRing<T, Coefficient>> for NegaCyclicRing<T, Coefficient>,
+    impl<T> AddAssign<NegaCyclicRing<T, Evaluation>> for NegaCyclicRing<T, Evaluation>,
+    impl<T> SubAssign<NegaCyclicRing<T, Coefficient>> for NegaCyclicRing<T, Coefficient>,
+    impl<T> SubAssign<NegaCyclicRing<T, Evaluation>> for NegaCyclicRing<T, Evaluation>,
 );
 impl_element_wise_op!(
-    impl<T> Add<NegaCyclicPoly<T, Coefficient>> for NegaCyclicPoly<T, Coefficient>,
-    impl<T> Add<NegaCyclicPoly<T, Evaluation>> for NegaCyclicPoly<T, Evaluation>,
-    impl<T> Sub<NegaCyclicPoly<T, Coefficient>> for NegaCyclicPoly<T, Coefficient>,
-    impl<T> Sub<NegaCyclicPoly<T, Evaluation>> for NegaCyclicPoly<T, Evaluation>,
+    impl<T> Add<NegaCyclicRing<T, Coefficient>> for NegaCyclicRing<T, Coefficient>,
+    impl<T> Add<NegaCyclicRing<T, Evaluation>> for NegaCyclicRing<T, Evaluation>,
+    impl<T> Sub<NegaCyclicRing<T, Coefficient>> for NegaCyclicRing<T, Coefficient>,
+    impl<T> Sub<NegaCyclicRing<T, Evaluation>> for NegaCyclicRing<T, Evaluation>,
 );
 impl_mul_assign_element!(
-    impl<T> MulAssign<T> for NegaCyclicPoly<T, Coefficient>,
-    impl<T> MulAssign<T> for NegaCyclicPoly<T, Evaluation>,
+    impl<T> MulAssign<T> for NegaCyclicRing<T, Coefficient>,
+    impl<T> MulAssign<T> for NegaCyclicRing<T, Evaluation>,
 );
 impl_mul_element!(
-    impl<T> Mul<T> for NegaCyclicPoly<T, Coefficient>,
-    impl<T> Mul<T> for NegaCyclicPoly<T, Evaluation>,
+    impl<T> Mul<T> for NegaCyclicRing<T, Coefficient>,
+    impl<T> Mul<T> for NegaCyclicRing<T, Evaluation>,
 );
 impl_rest_op_by_op_assign_ref!(
-    impl Mul<NegaCyclicPoly<Zq, Coefficient>> for NegaCyclicPoly<Zq, Coefficient>,
-    impl Mul<NegaCyclicPoly<Zq, Evaluation>> for NegaCyclicPoly<Zq, Evaluation>,
-    impl Mul<NegaCyclicPoly<i64, Coefficient>> for NegaCyclicPoly<i64, Coefficient>,
-    impl Mul<AVec<i64>> for NegaCyclicPoly<Zq>,
-    impl Mul<BigUint> for NegaCyclicPoly<Zq>,
-    impl Mul<Monomial> for NegaCyclicPoly<Zq>,
+    impl Mul<NegaCyclicRing<Zq, Coefficient>> for NegaCyclicRing<Zq, Coefficient>,
+    impl Mul<NegaCyclicRing<Zq, Evaluation>> for NegaCyclicRing<Zq, Evaluation>,
+    impl Mul<NegaCyclicRing<i64, Coefficient>> for NegaCyclicRing<i64, Coefficient>,
+    impl Mul<AVec<i64>> for NegaCyclicRing<Zq>,
+    impl Mul<BigUint> for NegaCyclicRing<Zq>,
+    impl Mul<Monomial> for NegaCyclicRing<Zq>,
 );
 
 pub struct Monomial(i64);
@@ -361,7 +361,7 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
-        poly::{nega_cyclic_schoolbook_mul, Coefficient, Rq},
+        ring::{nega_cyclic_schoolbook_mul, Coefficient, Rq},
         zq::two_adic_primes,
     };
     use core::array::from_fn;
