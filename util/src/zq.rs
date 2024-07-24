@@ -1,12 +1,10 @@
-use crate::misc::bit_reverse;
 use core::{
     borrow::Borrow,
     cmp::Ordering,
     iter::{successors, Product, Sum},
-    ops::{AddAssign, Deref, MulAssign, Neg, SubAssign},
+    ops::{AddAssign, MulAssign, Neg, SubAssign},
 };
 use derive_more::Display;
-use itertools::Itertools;
 use num_bigint::{BigInt, BigUint, ToBigUint};
 use num_bigint_dig::prime::probably_prime;
 use num_integer::Integer;
@@ -16,8 +14,8 @@ use rand::{
     RngCore,
 };
 use std::{
-    collections::{hash_map::Entry, HashMap},
-    sync::{Mutex, MutexGuard, OnceLock},
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Display)]
@@ -134,7 +132,7 @@ impl Zq {
     pub fn mod_switch_odd(self, q_prime: u64) -> Self {
         let v = (self.v as f64 * q_prime as f64) / self.q as f64;
         let u = v.floor();
-        if u == 0.0 {
+        if u == 0. {
             Self::from_u64(q_prime, v.round() as u64)
         } else {
             Self::from_u64(q_prime, u as u64 | 1)
@@ -336,46 +334,9 @@ fn primes(candidates: impl IntoIterator<Item = u64>) -> impl Iterator<Item = u64
         .filter(|candidate| is_prime(*candidate))
 }
 
-fn is_prime(q: impl Into<num_bigint_dig::BigUint>) -> bool {
-    probably_prime(&q.into(), 20)
-}
-
-static TWIDDLE: OnceLock<Mutex<HashMap<u64, [Vec<Zq>; 2]>>> = OnceLock::new();
-
-pub struct Twiddle<'a>(MutexGuard<'a, HashMap<u64, [Vec<Zq>; 2]>>, u64);
-
-impl<'a> Twiddle<'a> {
-    pub fn get(&self) -> Option<&[Vec<Zq>; 2]> {
-        self.0.get(&self.1)
-    }
-}
-
-impl<'a> Deref for Twiddle<'a> {
-    type Target = [Vec<Zq>; 2];
-
-    fn deref(&self) -> &Self::Target {
-        &self.0[&self.1]
-    }
-}
-
-// Twiddle factors in bit-reversed order.
-pub fn twiddle<'a>(q: u64) -> Twiddle<'a> {
-    let mut guard = TWIDDLE.get_or_init(Default::default).lock().unwrap();
-    if let Entry::Vacant(entry) = guard.entry(q) {
-        if is_prime(q) {
-            entry.insert(compute_twiddle(q));
-        }
-    }
-    Twiddle(guard, q)
-}
-
-fn compute_twiddle(q: u64) -> [Vec<Zq>; 2] {
-    let order = q - 1;
-    let s = order.trailing_zeros() as _;
-    let twiddle = Zq::two_adic_generator(q, s)
-        .powers()
-        .take(1 << (s - 1))
-        .collect_vec();
-    let twiddle_inv = twiddle.iter().map(|v| v.inv().unwrap()).collect();
-    [bit_reverse(twiddle), bit_reverse(twiddle_inv)]
+pub(crate) fn is_prime(q: u64) -> bool {
+    static PRIME: OnceLock<Mutex<HashMap<u64, bool>>> = OnceLock::new();
+    let mut map = PRIME.get_or_init(Default::default).lock().unwrap();
+    *map.entry(q)
+        .or_insert_with(|| probably_prime(&q.into(), 20))
 }

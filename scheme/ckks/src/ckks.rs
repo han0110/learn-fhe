@@ -3,9 +3,7 @@ use core::{iter::Sum, ops::Add};
 use derive_more::{Add, Deref, Sub};
 use itertools::{chain, izip, Itertools};
 use rand::RngCore;
-use util::{
-    dg, two_adic_primes, zo, AVec, BigFloat, BigInt, BigUint, Complex, NegaCyclicPoly, RnsRq, Zq,
-};
+use util::{dg, two_adic_primes, zo, AVec, BigInt, BigUint, NegaCyclicPoly, RnsRq, Zq, C256, F256};
 
 #[derive(Clone, Debug)]
 pub struct Ckks;
@@ -15,7 +13,7 @@ pub struct CkksParam {
     log_n: usize,
     qs: Vec<u64>,
     ps: Vec<u64>,
-    scale: BigFloat,
+    scale: F256,
 }
 
 impl CkksParam {
@@ -26,7 +24,7 @@ impl CkksParam {
         let mut primes = two_adic_primes(log_qi, log_n + 1);
         let qs = primes.by_ref().take(big_l).collect_vec();
         let ps = primes.by_ref().take(big_l).collect_vec();
-        let scale = BigFloat::from(*qs.last().unwrap());
+        let scale = F256::from(*qs.last().unwrap());
 
         Self {
             log_n,
@@ -68,7 +66,7 @@ impl CkksParam {
         self.ps.iter().product()
     }
 
-    pub fn scale(&self) -> &BigFloat {
+    pub fn scale(&self) -> &F256 {
         &self.scale
     }
 }
@@ -185,7 +183,7 @@ impl Ckks {
         CkksRotKey(j, Ckks::ksk_gen(param, sk, sk_rot, rng))
     }
 
-    pub fn encode(param: &CkksParam, m: AVec<Complex>) -> CkksPlaintext {
+    pub fn encode(param: &CkksParam, m: AVec<C256>) -> CkksPlaintext {
         assert_eq!(m.len(), param.l());
 
         let z = sifft(m);
@@ -199,15 +197,15 @@ impl Ckks {
         CkksPlaintext(pt)
     }
 
-    pub fn decode(param: &CkksParam, CkksPlaintext(pt): CkksPlaintext) -> AVec<Complex> {
+    pub fn decode(param: &CkksParam, CkksPlaintext(pt): CkksPlaintext) -> AVec<C256> {
         assert_eq!(pt.n(), param.n());
 
         let z_scaled = pt.into_bigint();
 
         let z = izip!(&z_scaled[..param.l()], &z_scaled[param.l()..])
             .map(|(re, im)| {
-                let [re, im] = [re, im].map(|z| BigFloat::from(z) / param.scale());
-                Complex::new(re, im)
+                let [re, im] = [re, im].map(|z| F256::from(z) / param.scale());
+                C256::new(re, im)
             })
             .collect();
 
@@ -249,7 +247,7 @@ impl Ckks {
         CkksPlaintext(pt)
     }
 
-    pub fn mul_constant(param: &CkksParam, m: AVec<Complex>, ct: CkksCiphertext) -> CkksCiphertext {
+    pub fn mul_constant(param: &CkksParam, m: AVec<C256>, ct: CkksCiphertext) -> CkksCiphertext {
         let CkksPlaintext(pt) = &Ckks::encode(param, m);
         CkksCiphertext(pt * ct.b(), pt * ct.a()).rescale()
     }
@@ -300,7 +298,7 @@ mod test {
     use crate::ckks::{Ckks, CkksParam};
     use core::array::from_fn;
     use rand::{distributions::Standard, rngs::StdRng, Rng, SeedableRng};
-    use util::{assert_eq_complex, izip_eq, vec_with, AVec, Complex, HadamardMul};
+    use util::{assert_eq_complex, izip_eq, vec_with, AVec, HadamardMul, C256};
 
     #[test]
     fn encrypt_decrypt() {
@@ -327,7 +325,7 @@ mod test {
         for log_n in 1..10 {
             let param = CkksParam::new(log_n, log_qi, big_l);
             let (sk, pk) = Ckks::key_gen(&param, rng);
-            let [m0, m1] = &from_fn(|_| AVec::<Complex>::sample(param.l(), Standard, rng));
+            let [m0, m1] = &from_fn(|_| AVec::<C256>::sample(param.l(), Standard, rng));
             let [pt0, pt1] = [m0, m1].map(|m| Ckks::encode(&param, m.clone()));
             let [ct0, ct1] = [pt0, pt1].map(|pt| Ckks::pk_encrypt(&param, &pk, pt, rng));
             let (m2, ct2) = (m0 + m1, ct0.clone() + ct1.clone());
@@ -348,7 +346,7 @@ mod test {
             let (sk, pk) = Ckks::key_gen(&param, rng);
             let mul_m = |a, b| HadamardMul::hada_mul(&a, &b);
             let mul_ct = |ct, m| Ckks::mul_constant(&param, m, ct);
-            let ms = vec_with![|| AVec::<Complex>::sample(param.l(), Standard, rng); big_l - 1];
+            let ms = vec_with![|| AVec::<C256>::sample(param.l(), Standard, rng); big_l - 1];
             let pt = Ckks::encode(&param, ms[0].clone());
             let ct = Ckks::pk_encrypt(&param, &pk, pt, rng);
             let m = ms.clone().into_iter().reduce(mul_m).unwrap();
@@ -368,7 +366,7 @@ mod test {
             let rlk = Ckks::rlk_gen(&param, &sk, rng);
             let mul_m = |a, b| HadamardMul::hada_mul(&a, &b);
             let mul_ct = |a, b| Ckks::mul(&param, &rlk, a, b);
-            let ms = vec_with![|| AVec::<Complex>::sample(param.l(), Standard, rng); big_l - 1];
+            let ms = vec_with![|| AVec::<C256>::sample(param.l(), Standard, rng); big_l - 1];
             let pts = vec_with![|m| Ckks::encode(&param, m.clone()); &ms];
             let cts = vec_with![|pt| Ckks::pk_encrypt(&param, &pk, pt, rng); pts];
             let m = ms.into_iter().reduce(mul_m).unwrap();

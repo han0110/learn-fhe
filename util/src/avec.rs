@@ -1,4 +1,4 @@
-use crate::{float::Complex, zq::Zq};
+use crate::{complex::C256, zq::Zq};
 use core::{
     borrow::Borrow,
     fmt::{self, Display, Formatter},
@@ -65,11 +65,15 @@ impl AVec<Zq> {
     pub fn mod_switch_odd(&self, q_prime: u64) -> Self {
         self.iter().map(|v| v.mod_switch_odd(q_prime)).collect()
     }
+
+    pub fn q(&self) -> u64 {
+        self[0].q()
+    }
 }
 
-impl AVec<Complex> {
+impl AVec<C256> {
     pub fn conjugate(&self) -> Self {
-        self.iter().map(Complex::conj).collect()
+        self.iter().map(C256::conj).collect()
     }
 }
 

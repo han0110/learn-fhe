@@ -6,7 +6,7 @@ use derive_more::Deref;
 use itertools::{chain, izip, Itertools};
 use rand::RngCore;
 use std::{collections::BTreeMap, iter::repeat};
-use util::{vec_with, Complex, DiagSparseMatrix};
+use util::{vec_with, DiagSparseMatrix, C256};
 
 #[derive(Debug)]
 pub struct Bootstrapping;
@@ -15,8 +15,8 @@ pub struct Bootstrapping;
 pub struct BootstrappingParam {
     #[deref]
     param: CkksParam,
-    sfft_fmats: Vec<DiagSparseMatrix<Complex>>,
-    sifft_fmats: Vec<DiagSparseMatrix<Complex>>,
+    sfft_fmats: Vec<DiagSparseMatrix<C256>>,
+    sifft_fmats: Vec<DiagSparseMatrix<C256>>,
 }
 
 impl BootstrappingParam {
@@ -30,11 +30,11 @@ impl BootstrappingParam {
         }
     }
 
-    pub fn sfft_fmats(&self) -> &[DiagSparseMatrix<Complex>] {
+    pub fn sfft_fmats(&self) -> &[DiagSparseMatrix<C256>] {
         &self.sfft_fmats
     }
 
-    pub fn sifft_fmats(&self) -> &[DiagSparseMatrix<Complex>] {
+    pub fn sifft_fmats(&self) -> &[DiagSparseMatrix<C256>] {
         &self.sifft_fmats
     }
 }
@@ -80,7 +80,7 @@ impl Bootstrapping {
 
     fn mul_mats(
         bk: &BootstrappingKey,
-        mats: &[DiagSparseMatrix<Complex>],
+        mats: &[DiagSparseMatrix<C256>],
         ct: CkksCiphertext,
     ) -> CkksCiphertext {
         let mul_mat = |ct, mat| Self::mul_mat(bk, mat, ct);
@@ -89,7 +89,7 @@ impl Bootstrapping {
 
     fn mul_mat(
         bk: &BootstrappingKey,
-        mat: &DiagSparseMatrix<Complex>,
+        mat: &DiagSparseMatrix<C256>,
         ct: CkksCiphertext,
     ) -> CkksCiphertext {
         let rotate = |j, ct| match j {

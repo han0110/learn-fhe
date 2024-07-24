@@ -4,8 +4,10 @@ use crate::{
         impl_mul_assign_element, impl_mul_element, AVec,
     },
     izip_eq,
-    misc::Butterfly,
-    zq::{impl_rest_op_by_op_assign_ref, twiddle, Zq},
+    poly::fft::zq::{
+        nega_cyclic_intt_in_place, nega_cyclic_ntt_in_place, nega_cyclic_ntt_mul_assign,
+    },
+    zq::{impl_rest_op_by_op_assign_ref, is_prime, Zq},
 };
 use core::{
     borrow::Borrow,
@@ -15,12 +17,13 @@ use core::{
     ops::{AddAssign, BitXor, Mul, MulAssign, Neg, SubAssign},
     slice,
 };
-use derive_more::{Deref, DerefMut};
+use derive_more::{AsMut, AsRef, Deref, DerefMut};
 use itertools::izip;
 use num_bigint::{BigInt, BigUint};
 use rand::{distributions::Distribution, RngCore};
 use std::vec;
 
+pub mod fft;
 pub mod rns;
 
 pub trait Basis: Clone + Copy + Debug + PartialEq + Eq {}
@@ -37,10 +40,12 @@ impl Basis for Evaluation {}
 
 pub type Rq<B = Coefficient> = NegaCyclicPoly<Zq, B>;
 
-#[derive(Clone, Debug, PartialEq, Eq, Deref, DerefMut)]
+#[derive(Clone, Debug, PartialEq, Eq, Deref, DerefMut, AsRef, AsMut)]
 pub struct NegaCyclicPoly<T, B: Basis = Coefficient>(
     #[deref]
     #[deref_mut]
+    #[as_ref(forward)]
+    #[as_mut(forward)]
     AVec<T>,
     PhantomData<B>,
 );
@@ -126,18 +131,16 @@ impl NegaCyclicPoly<Zq, Coefficient> {
     }
 
     pub fn to_evaluation(&self) -> NegaCyclicPoly<Zq, Evaluation> {
-        let [psi, _] = &*twiddle(self.q());
         let mut a = self.0.clone();
-        nega_cyclic_ntt_in_place(&mut a, psi);
+        nega_cyclic_ntt_in_place(&mut a);
         NegaCyclicPoly::new(a)
     }
 }
 
 impl NegaCyclicPoly<Zq, Evaluation> {
     pub fn to_coefficient(&self) -> NegaCyclicPoly<Zq, Coefficient> {
-        let [_, psi_inv] = &*twiddle(self.q());
         let mut a = self.0.clone();
-        nega_cyclic_intt_in_place(&mut a, psi_inv);
+        nega_cyclic_intt_in_place(&mut a);
         NegaCyclicPoly::new(a)
     }
 }
@@ -214,11 +217,9 @@ impl<'a, T, B: Basis> IntoIterator for &'a mut NegaCyclicPoly<T, B> {
 impl MulAssign<&NegaCyclicPoly<Zq, Coefficient>> for NegaCyclicPoly<Zq, Coefficient> {
     fn mul_assign(&mut self, rhs: &NegaCyclicPoly<Zq, Coefficient>) {
         assert_eq!(self.n(), rhs.n());
-        match twiddle(self.q()).get() {
-            Some([psi, psi_inv]) if self.n() <= psi.len() => {
-                nega_cyclic_ntt_mul_assign(self, rhs, psi, psi_inv)
-            }
-            _ => *self = nega_cyclic_schoolbook_mul(self, rhs),
+        match is_prime(self.q()) {
+            true => nega_cyclic_ntt_mul_assign(self, rhs),
+            false => *self = nega_cyclic_schoolbook_mul(self, rhs),
         }
     }
 }
@@ -337,78 +338,30 @@ impl BitXor<Zq> for X {
     }
 }
 
-fn nega_cyclic_schoolbook_mul<T>(a: &NegaCyclicPoly<T>, b: &NegaCyclicPoly<T>) -> NegaCyclicPoly<T>
+fn nega_cyclic_schoolbook_mul<T, V: AsRef<[T]> + AsMut<[T]> + FromIterator<T>>(a: &V, b: &V) -> V
 where
     T: AddAssign<T> + SubAssign<T>,
     for<'t> &'t T: Mul<&'t T, Output = T>,
 {
-    let n = a.n();
-    let mut c = a.iter().map(|a| a * &b[0]).collect::<NegaCyclicPoly<_>>();
+    let (a, b) = (a.as_ref(), b.as_ref());
+    let n = a.len();
+    let mut c = a.iter().map(|a| a * &b[0]).collect::<V>();
     izip!(0.., a.iter()).for_each(|(i, a)| {
         izip!(0.., b.iter()).skip(1).for_each(|(j, b)| {
             if i + j < n {
-                c[i + j] += a * b;
+                c.as_mut()[i + j] += a * b;
             } else {
-                c[i + j - n] -= a * b;
+                c.as_mut()[i + j - n] -= a * b;
             }
         })
     });
     c
 }
 
-fn nega_cyclic_ntt_mul_assign(
-    a: &mut NegaCyclicPoly<Zq>,
-    b: &NegaCyclicPoly<Zq>,
-    psi: &[Zq],
-    psi_inv: &[Zq],
-) {
-    let b = &mut b.clone();
-    nega_cyclic_ntt_in_place(a, psi);
-    nega_cyclic_ntt_in_place(b, psi);
-    izip!(a.iter_mut(), b.iter()).for_each(|(a, b)| *a *= b);
-    nega_cyclic_intt_in_place(a, psi_inv);
-}
-
-// Algorithm 1 in 2016/504.
-fn nega_cyclic_ntt_in_place(a: &mut [Zq], psi: &[Zq]) {
-    assert!(a.len().is_power_of_two());
-    for log_m in 0..a.len().ilog2() {
-        let m = 1 << log_m;
-        let t = a.len() / m;
-        izip!(0.., a.chunks_exact_mut(t), &psi[m..]).for_each(|(i, a, psi)| {
-            let (u, v) = a.split_at_mut(t / 2);
-            if m == 0 && i == 0 {
-                izip!(u, v).for_each(|(u, v)| Butterfly::twiddle_free(u, v));
-            } else {
-                izip!(u, v).for_each(|(u, v)| Butterfly::dit(u, v, psi));
-            }
-        });
-    }
-}
-
-// Algorithm 2 in 2016/504.
-fn nega_cyclic_intt_in_place(a: &mut [Zq], psi_inv: &[Zq]) {
-    assert!(a.len().is_power_of_two());
-    for log_m in (0..a.len().ilog2()).rev() {
-        let m = 1 << log_m;
-        let t = a.len() / m;
-        izip!(0.., a.chunks_exact_mut(t), &psi_inv[m..]).for_each(|(i, a, psi_inv)| {
-            let (u, v) = a.split_at_mut(t / 2);
-            if m == 0 && i == 0 {
-                izip!(u, v).for_each(|(u, v)| Butterfly::twiddle_free(u, v));
-            } else {
-                izip!(u, v).for_each(|(u, v)| Butterfly::dif(u, v, psi_inv));
-            }
-        });
-    }
-    let n_inv = Zq::from_u64(a[0].q(), a.len() as u64).inv().unwrap();
-    a.iter_mut().for_each(|a| *a *= n_inv);
-}
-
 #[cfg(test)]
 mod test {
     use crate::{
-        poly::{nega_cyclic_schoolbook_mul, NegaCyclicPoly},
+        poly::{nega_cyclic_schoolbook_mul, Coefficient, Rq},
         zq::two_adic_primes,
     };
     use core::array::from_fn;
@@ -420,7 +373,7 @@ mod test {
         for log_n in 0..10 {
             let n = 1 << log_n;
             for q in two_adic_primes(45, log_n + 1).take(10) {
-                let [a, b] = &from_fn(|_| NegaCyclicPoly::sample_uniform(q, n, &mut rng));
+                let [a, b] = &from_fn(|_| Rq::<Coefficient>::sample_uniform(q, n, &mut rng));
                 assert_eq!(a * b, nega_cyclic_schoolbook_mul(a, b));
             }
         }

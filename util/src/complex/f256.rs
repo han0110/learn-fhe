@@ -1,5 +1,5 @@
 use crate::zq::impl_rest_op_by_op_assign_ref;
-use astro_float::{Consts, Radix, RoundingMode, WORD_BIT_SIZE};
+use astro_float::{BigFloat, Consts, Radix, RoundingMode, WORD_BIT_SIZE};
 use core::{
     borrow::Borrow,
     ops::{Neg, ShlAssign, ShrAssign},
@@ -12,25 +12,23 @@ use rand::{
     Rng,
 };
 
-pub type Complex<T = BigFloat> = num_complex::Complex<T>;
-
 const PRECISION: usize = 256;
 const RM: RoundingMode = RoundingMode::None;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Display, Neg)]
-pub struct BigFloat(astro_float::BigFloat);
+pub struct F256(BigFloat);
 
-impl BigFloat {
+impl F256 {
     pub fn pi() -> Self {
         Self(Consts::new().unwrap().pi(PRECISION, RM))
     }
 
     pub fn cos(&self) -> Self {
-        BigFloat(self.0.cos(PRECISION, RM, &mut Consts::new().unwrap()))
+        F256(self.0.cos(PRECISION, RM, &mut Consts::new().unwrap()))
     }
 
     pub fn sin(&self) -> Self {
-        BigFloat(self.0.sin(PRECISION, RM, &mut Consts::new().unwrap()))
+        F256(self.0.sin(PRECISION, RM, &mut Consts::new().unwrap()))
     }
 
     pub fn abs(&self) -> Self {
@@ -42,9 +40,9 @@ macro_rules! impl_from {
     ($($primitive:ty),*) => {
         $(
             paste::paste! {
-                impl From<$primitive> for BigFloat {
-                    fn from(value: $primitive) -> BigFloat {
-                        BigFloat(astro_float::BigFloat::[<from_$primitive>](value, PRECISION))
+                impl From<$primitive> for F256 {
+                    fn from(value: $primitive) -> F256 {
+                        F256(BigFloat::[<from_$primitive>](value, PRECISION))
                     }
                 }
             }
@@ -54,27 +52,27 @@ macro_rules! impl_from {
 
 impl_from!(u8, i8, u16, i16, u32, i32, u64, i64, u128, i128, f32, f64);
 
-impl From<usize> for BigFloat {
+impl From<usize> for F256 {
     fn from(value: usize) -> Self {
         Self::from(value as u64)
     }
 }
 
-impl From<isize> for BigFloat {
+impl From<isize> for F256 {
     fn from(value: isize) -> Self {
         Self::from(value as i64)
     }
 }
 
-impl Neg for &BigFloat {
-    type Output = BigFloat;
+impl Neg for &F256 {
+    type Output = F256;
 
-    fn neg(self) -> BigFloat {
+    fn neg(self) -> F256 {
         -self.clone()
     }
 }
 
-impl ShlAssign<&usize> for BigFloat {
+impl ShlAssign<&usize> for F256 {
     #[allow(clippy::suspicious_op_assign_impl)]
     fn shl_assign(&mut self, rhs: &usize) {
         let e = self.0.exponent().unwrap() + *rhs as i32;
@@ -82,7 +80,7 @@ impl ShlAssign<&usize> for BigFloat {
     }
 }
 
-impl ShrAssign<&usize> for BigFloat {
+impl ShrAssign<&usize> for F256 {
     #[allow(clippy::suspicious_op_assign_impl)]
     fn shr_assign(&mut self, rhs: &usize) {
         let e = self.0.exponent().unwrap() - *rhs as i32;
@@ -94,20 +92,20 @@ macro_rules! impl_arithmetic_op {
     (@ impl $trait:ident<$rhs:ty> for $lhs:ty) => {
         paste::paste! {
             impl core::ops::$trait<$rhs> for $lhs {
-                type Output = BigFloat;
+                type Output = F256;
 
-                fn [<$trait:lower>](self, other: $rhs) -> BigFloat {
-                    BigFloat(self.0.[<$trait:lower>](&other.0, PRECISION, RM))
+                fn [<$trait:lower>](self, other: $rhs) -> F256 {
+                    F256(self.0.[<$trait:lower>](&other.0, PRECISION, RM))
                 }
             }
         }
     };
-    ($(impl $trait:ident for BigFloat),* $(,)?) => {
+    ($(impl $trait:ident for F256),* $(,)?) => {
         $(
-            impl_arithmetic_op!(@ impl $trait<BigFloat> for BigFloat);
-            impl_arithmetic_op!(@ impl $trait<&BigFloat> for BigFloat);
-            impl_arithmetic_op!(@ impl $trait<BigFloat> for &BigFloat);
-            impl_arithmetic_op!(@ impl $trait<&BigFloat> for &BigFloat);
+            impl_arithmetic_op!(@ impl $trait<F256> for F256);
+            impl_arithmetic_op!(@ impl $trait<&F256> for F256);
+            impl_arithmetic_op!(@ impl $trait<F256> for &F256);
+            impl_arithmetic_op!(@ impl $trait<&F256> for &F256);
         )*
     };
 }
@@ -116,10 +114,10 @@ macro_rules! impl_rem {
     ($(impl Rem<$rhs:ty> for $lhs:ty),* $(,)?) => {
         $(
             impl core::ops::Rem<$rhs> for $lhs {
-                type Output = BigFloat;
+                type Output = F256;
 
-                fn rem(self, other: $rhs) -> BigFloat {
-                    BigFloat(self.0.rem(&other.0))
+                fn rem(self, other: $rhs) -> F256 {
+                    F256(self.0.rem(&other.0))
                 }
             }
         )*
@@ -127,51 +125,51 @@ macro_rules! impl_rem {
 }
 
 macro_rules! impl_arithmetic_op_assign {
-    (@ impl $trait:ident<$rhs:ty> for BigFloat) => {
+    (@ impl $trait:ident<$rhs:ty> for F256) => {
         paste::paste! {
-            impl core::ops::[<$trait Assign>]<$rhs> for BigFloat {
+            impl core::ops::[<$trait Assign>]<$rhs> for F256 {
                 fn [<$trait:lower _assign>](&mut self, rhs: $rhs) {
                     *self = core::ops::$trait::[<$trait:lower>](&*self, rhs);
                 }
             }
         }
     };
-    ($(impl $trait:ident for BigFloat),* $(,)?) => {
+    ($(impl $trait:ident for F256),* $(,)?) => {
         $(
-            impl_arithmetic_op_assign!(@ impl $trait<BigFloat> for BigFloat);
-            impl_arithmetic_op_assign!(@ impl $trait<&BigFloat> for BigFloat);
+            impl_arithmetic_op_assign!(@ impl $trait<F256> for F256);
+            impl_arithmetic_op_assign!(@ impl $trait<&F256> for F256);
         )*
     };
 }
 
 impl_arithmetic_op!(
-    impl Add for BigFloat,
-    impl Sub for BigFloat,
-    impl Mul for BigFloat,
-    impl Div for BigFloat,
+    impl Add for F256,
+    impl Sub for F256,
+    impl Mul for F256,
+    impl Div for F256,
 );
 
 impl_rem!(
-    impl Rem<BigFloat> for BigFloat,
-    impl Rem<&BigFloat> for BigFloat,
-    impl Rem<BigFloat> for &BigFloat,
-    impl Rem<&BigFloat> for &BigFloat,
+    impl Rem<F256> for F256,
+    impl Rem<&F256> for F256,
+    impl Rem<F256> for &F256,
+    impl Rem<&F256> for &F256,
 );
 
 impl_arithmetic_op_assign!(
-    impl Add for BigFloat,
-    impl Sub for BigFloat,
-    impl Mul for BigFloat,
-    impl Div for BigFloat,
-    impl Rem for BigFloat,
+    impl Add for F256,
+    impl Sub for F256,
+    impl Mul for F256,
+    impl Div for F256,
+    impl Rem for F256,
 );
 
 impl_rest_op_by_op_assign_ref!(
-    impl Shl<usize> for BigFloat,
-    impl Shr<usize> for BigFloat,
+    impl Shl<usize> for F256,
+    impl Shr<usize> for F256,
 );
 
-impl Zero for BigFloat {
+impl Zero for F256 {
     fn zero() -> Self {
         Self::from(0)
     }
@@ -181,7 +179,7 @@ impl Zero for BigFloat {
     }
 }
 
-impl One for BigFloat {
+impl One for F256 {
     fn one() -> Self {
         Self::from(1)
     }
@@ -191,7 +189,7 @@ impl One for BigFloat {
     }
 }
 
-impl Num for BigFloat {
+impl Num for F256 {
     type FromStrRadixErr = &'static str;
 
     fn from_str_radix(str: &str, radix: u32) -> Result<Self, Self::FromStrRadixErr> {
@@ -202,7 +200,7 @@ impl Num for BigFloat {
             16 => Radix::Hex,
             _ => return Err("Unsupported radix"),
         };
-        Ok(Self(astro_float::BigFloat::parse(
+        Ok(Self(BigFloat::parse(
             str,
             radix,
             PRECISION,
@@ -212,8 +210,8 @@ impl Num for BigFloat {
     }
 }
 
-impl From<&BigFloat> for BigInt {
-    fn from(value: &BigFloat) -> BigInt {
+impl From<&F256> for BigInt {
+    fn from(value: &F256) -> BigInt {
         let (m, n, s, e, _) = value.0.as_raw_parts().unwrap();
 
         if n == 0 {
@@ -240,13 +238,13 @@ impl From<&BigFloat> for BigInt {
     }
 }
 
-impl From<BigFloat> for BigInt {
-    fn from(value: BigFloat) -> Self {
+impl From<F256> for BigInt {
+    fn from(value: F256) -> Self {
         Self::from(&value)
     }
 }
 
-impl From<&BigInt> for BigFloat {
+impl From<&BigInt> for F256 {
     fn from(value: &BigInt) -> Self {
         let (sign, digits) = value.to_radix_be(10);
         let sign = if matches!(sign, num_bigint::Sign::Minus) {
@@ -254,7 +252,7 @@ impl From<&BigInt> for BigFloat {
         } else {
             astro_float::Sign::Pos
         };
-        BigFloat(astro_float::BigFloat::convert_from_radix(
+        F256(BigFloat::convert_from_radix(
             sign,
             &digits,
             digits.len() as _,
@@ -266,26 +264,26 @@ impl From<&BigInt> for BigFloat {
     }
 }
 
-impl From<BigInt> for BigFloat {
+impl From<BigInt> for F256 {
     fn from(value: BigInt) -> Self {
         Self::from(&value)
     }
 }
 
-impl Distribution<BigFloat> for Uniform<f32> {
-    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> BigFloat {
+impl Distribution<F256> for Uniform<f32> {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> F256 {
         rng.sample::<f32, _>(self).into()
     }
 }
 
-impl Distribution<BigFloat> for Uniform<f64> {
-    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> BigFloat {
+impl Distribution<F256> for Uniform<f64> {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> F256 {
         rng.sample::<f64, _>(self).into()
     }
 }
 
-impl Distribution<BigFloat> for Standard {
-    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> BigFloat {
+impl Distribution<F256> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> F256 {
         rng.sample::<f64, _>(self).into()
     }
 }
@@ -296,7 +294,7 @@ macro_rules! assert_eq_float {
         let (lhs, rhs) = ($lhs, $rhs);
         let diff = (lhs - rhs).abs();
         assert!(
-            diff < ($crate::BigFloat::from(1) >> $precision),
+            diff < ($crate::F256::from(1) >> $precision),
             concat!(
                 "assertion `left",
                 $(".", $field,)?

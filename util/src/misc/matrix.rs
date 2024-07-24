@@ -1,7 +1,7 @@
 use crate::{
     avec::AVec,
     cartesian,
-    float::{BigFloat, Complex},
+    complex::{f256::F256, C256},
     misc::HadamardMul,
     zq::Zq,
 };
@@ -61,15 +61,15 @@ impl DiagSparseMatrix<Zq> {
     }
 }
 
-impl DiagSparseMatrix<Complex> {
-    pub fn to_dense(&self) -> Vec<Vec<Complex>> {
-        let mut dense = vec![vec![Complex::zero(); self.n()]; self.n()];
+impl DiagSparseMatrix<C256> {
+    pub fn to_dense(&self) -> Vec<Vec<C256>> {
+        let mut dense = vec![vec![C256::zero(); self.n()]; self.n()];
         self.clone_into_dense(&mut dense);
         dense
     }
 
     pub fn inv(&self) -> Self {
-        let two = &BigFloat::from(2);
+        let two = &F256::from(2);
         let diags = self
             .diags()
             .iter()

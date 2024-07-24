@@ -1,7 +1,7 @@
 use crate::izip_eq;
 use core::{
     iter::{successors, Sum},
-    ops::{Add, Mul, Sub},
+    ops::{Add, Mul},
 };
 use num_traits::One;
 
@@ -39,44 +39,6 @@ pub fn bit_reverse<T, V: AsMut<[T]>>(mut values: V) -> V {
         }
     }
     values
-}
-
-pub trait Butterfly {
-    fn dit(a: &mut Self, b: &mut Self, t: &Self);
-
-    fn dif(a: &mut Self, b: &mut Self, t: &Self);
-
-    fn twiddle_free(a: &mut Self, b: &mut Self);
-}
-
-impl<T> Butterfly for T
-where
-    for<'t> &'t T: Mul<&'t T, Output = T> + Add<&'t T, Output = T> + Sub<&'t T, Output = T>,
-{
-    #[inline(always)]
-    fn dit(a: &mut Self, b: &mut Self, t: &Self) {
-        let tb = t * b;
-        let c = &*a + &tb;
-        let d = &*a - &tb;
-        *a = c;
-        *b = d;
-    }
-
-    #[inline(always)]
-    fn dif(a: &mut Self, b: &mut Self, t: &Self) {
-        let c = &*a + b;
-        let d = &(&*a - b) * t;
-        *a = c;
-        *b = d;
-    }
-
-    #[inline(always)]
-    fn twiddle_free(a: &mut Self, b: &mut Self) {
-        let c = &*a + b;
-        let d = &*a - b;
-        *a = c;
-        *b = d;
-    }
 }
 
 pub trait Dot<Rhs> {
