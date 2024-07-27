@@ -254,9 +254,10 @@ impl Bootstrapping {
         rng: &mut impl RngCore,
     ) -> BootstrappingCommonRefStr {
         let pk = Rq::sample_uniform(param.big_q(), param.n(), rng);
-        let ksk = repeat_with(|| AVec::sample_uniform(param.big_q_ks(), param.lwe_s().n(), rng))
-            .take(param.n() * param.lwe_s().decomposor().d())
-            .collect();
+        let ksk =
+            repeat_with(|| AVec::<Zq>::sample_uniform(param.big_q_ks(), param.lwe_s().n(), rng))
+                .take(param.n() * param.lwe_s().decomposor().d())
+                .collect();
         let ak = repeat_with(|| {
             repeat_with(|| Rq::sample_uniform(param.big_q(), param.n(), rng))
                 .take(param.rlwe().decomposor().d())
@@ -301,17 +302,15 @@ impl Bootstrapping {
             .map(|s| (s.ksk, s.brk, s.ak))
             .multiunzip::<(Vec<_>, Vec<_>, Vec<_>)>();
         let ksk = Lwe::ksk_share_merge(param.lwe_s(), crs.ksk, ksk_shares);
-        let brk = zipstar!(brk_shares)
-            .map(|shares| {
-                let merge = |acc, item| Rgsw::internal_product(param.rgsw(), acc, item);
-                shares.into_iter().reduce(merge).unwrap()
-            })
-            .collect();
-        let ak = {
-            izip!(param.ak_t(), crs.ak, zipstar!(ak_shares))
-                .map(|(t, crs, ak_share)| Rlwe::ak_share_merge(param.rlwe(), t, crs, ak_share))
+        let brk = {
+            let merge = |acc, item| Rgsw::internal_product(param.rgsw(), acc, item);
+            zipstar!(brk_shares)
+                .map(|shares| shares.into_iter().reduce(merge).unwrap())
                 .collect()
         };
+        let ak = izip!(param.ak_t(), crs.ak, zipstar!(ak_shares))
+            .map(|(t, crs, ak_share)| Rlwe::ak_share_merge(param.rlwe(), t, crs, ak_share))
+            .collect();
         BootstrappingKey {
             param: *param,
             ksk,

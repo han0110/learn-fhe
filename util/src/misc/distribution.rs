@@ -1,5 +1,11 @@
+use crate::torus::T64;
 use core::f64::consts::SQRT_2;
 use rand::distributions::{Distribution, Standard, WeightedIndex};
+use rand_distr::Normal;
+
+pub fn binary() -> impl Distribution<i64> {
+    Standard.map(move |v: f64| if v <= 0.5 { 0 } else { 1 })
+}
 
 pub fn zo(rho: f64) -> impl Distribution<i64> {
     assert!(rho <= 1.0);
@@ -38,4 +44,8 @@ pub fn dg(std_dev: f64, n: usize) -> impl Distribution<i64> {
     WeightedIndex::new(weights)
         .unwrap()
         .map(move |v| v as i64 - max)
+}
+
+pub fn tdg(std_dev: f64) -> impl Distribution<T64> {
+    Normal::new(0., std_dev).unwrap().map(T64::from)
 }

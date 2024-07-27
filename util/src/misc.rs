@@ -50,10 +50,9 @@ pub trait Dot<Rhs> {
 impl<'a, L, R, IL, IR> Dot<IR> for IL
 where
     IL: IntoIterator<Item = &'a L>,
-    IR: IntoIterator<Item = &'a R>,
+    IR: IntoIterator<Item = R>,
     L: 'a + Sum,
-    R: 'a,
-    for<'t> &'t L: Mul<&'t R, Output = L>,
+    for<'t> &'t L: Mul<R, Output = L>,
 {
     type Output = L;
 
@@ -119,11 +118,11 @@ macro_rules! cartesian {
     ($first:expr, $second:expr $(,)*) => {
         itertools::Itertools::cartesian_product($crate::cartesian!($first), $second)
     };
-    ($first:expr $(, $rest:expr)* $(,)*) => {
-        let t = $crate::cartesian_product!($first);
-        $(let t = $crate::cartesian_product!(t, $rest);)*
-        t.map($crate::cartesian_product!(@closure a => (a) $(, $rest)*))
-    };
+    ($first:expr $(, $rest:expr)* $(,)*) => {{
+        let t = $crate::cartesian!($first);
+        $(let t = $crate::cartesian!(t, $rest);)*
+        t.map($crate::cartesian!(@closure a => (a) $(, $rest)*))
+    }};
 }
 
 #[macro_export]

@@ -45,11 +45,11 @@ pub struct RlweKeySwitchingKey(AVec<RlweCiphertext>);
 
 impl RlweKeySwitchingKey {
     pub fn a(&self) -> impl Iterator<Item = &Rq> {
-        self.0.iter().map(|ct| ct.a())
+        self.0.iter().map(RlweCiphertext::a)
     }
 
     pub fn b(&self) -> impl Iterator<Item = &Rq> {
-        self.0.iter().map(|ct| ct.b())
+        self.0.iter().map(RlweCiphertext::b)
     }
 }
 

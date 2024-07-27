@@ -12,16 +12,16 @@ pub struct Rgsw;
 pub struct RgswParam {
     #[deref]
     rlwe: RlweParam,
-    decomposor: Base2Decomposor,
+    decomposor: Base2Decomposor<Zq>,
 }
 
 impl RgswParam {
     pub fn new(rlwe: RlweParam, log_b: usize, d: usize) -> Self {
-        let decomposor = Base2Decomposor::new(rlwe.q(), log_b, d);
+        let decomposor = Base2Decomposor::<Zq>::new(rlwe.q(), log_b, d);
         Self { rlwe, decomposor }
     }
 
-    pub fn decomposor(&self) -> &Base2Decomposor {
+    pub fn decomposor(&self) -> &Base2Decomposor<Zq> {
         &self.decomposor
     }
 }
@@ -38,11 +38,11 @@ pub struct RgswCiphertext(AVec<RlweCiphertext>);
 
 impl RgswCiphertext {
     pub fn a(&self) -> impl Iterator<Item = &Rq> {
-        self.0.iter().map(|ct| ct.a())
+        self.0.iter().map(RlweCiphertext::a)
     }
 
     pub fn b(&self) -> impl Iterator<Item = &Rq> {
-        self.0.iter().map(|ct| ct.b())
+        self.0.iter().map(RlweCiphertext::b)
     }
 }
 
@@ -84,10 +84,10 @@ impl Rgsw {
     fn encrypt(
         param: &RgswParam,
         key: Either<&RgswSecretKey, &RgswPublicKey>,
-        pt: RgswPlaintext,
+        RgswPlaintext(pt): RgswPlaintext,
         rng: &mut impl RngCore,
     ) -> RgswCiphertext {
-        let pt = param.decomposor().power_up(pt.0).collect_vec();
+        let pt = param.decomposor().power_up(pt).collect_vec();
         let mut ct = {
             let zero = RlwePlaintext(Rq::zero(param.q(), param.n()));
             let rlwe_encrypt_zero = || match key {
@@ -104,9 +104,13 @@ impl Rgsw {
         RgswCiphertext(ct)
     }
 
-    pub fn decrypt(param: &RgswParam, sk: &RgswSecretKey, ct: RgswCiphertext) -> RgswPlaintext {
-        let pt = Rlwe::decrypt(param, sk, ct.0.into_iter().last().unwrap());
-        RgswPlaintext(pt.0.rounding_shr(param.decomposor().log_bases().last().unwrap()))
+    pub fn decrypt(
+        param: &RgswParam,
+        sk: &RgswSecretKey,
+        RgswCiphertext(ct): RgswCiphertext,
+    ) -> RgswPlaintext {
+        let pt = Rlwe::decrypt(param, sk, ct.into_iter().last().unwrap()).0;
+        RgswPlaintext(pt.rounding_shr(param.decomposor().log_bases().last().unwrap()))
     }
 
     pub fn external_product(

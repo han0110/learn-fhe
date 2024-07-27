@@ -72,7 +72,7 @@ mod test {
         avec::AVec,
         ring::{
             fft::zq::{nega_cyclic_intt_in_place, nega_cyclic_ntt, nega_cyclic_ntt_mul_assign},
-            nega_cyclic_schoolbook_mul,
+            test::nega_cyclic_schoolbook_mul,
         },
         zq::{two_adic_primes, Zq},
     };
@@ -97,7 +97,7 @@ mod test {
         for log_n in 0..10 {
             let n = 1 << log_n;
             for q in two_adic_primes(45, log_n + 1).take(10) {
-                let a = AVec::sample_uniform(q, n, &mut rng);
+                let a = AVec::<Zq>::sample_uniform(q, n, &mut rng);
                 assert_eq!(nega_cyclic_intt(&nega_cyclic_ntt(&a)), a);
             }
         }
@@ -109,7 +109,7 @@ mod test {
         for log_n in 0..10 {
             let n = 1 << log_n;
             for q in two_adic_primes(45, log_n + 1).take(10) {
-                let [a, b] = &from_fn(|_| AVec::sample_uniform(q, n, &mut rng));
+                let [a, b] = &from_fn(|_| AVec::<Zq>::sample_uniform(q, n, &mut rng));
                 assert_eq!(nega_cyclic_ntt_mul(a, b), nega_cyclic_schoolbook_mul(a, b));
             }
         }

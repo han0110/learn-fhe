@@ -4,9 +4,14 @@ use crate::{
         impl_mul_assign_element, impl_mul_element, AVec,
     },
     izip_eq,
-    ring::fft::zq::{
-        nega_cyclic_intt_in_place, nega_cyclic_ntt_in_place, nega_cyclic_ntt_mul_assign,
+    ring::{
+        fft::{
+            c64::nega_cyclic_fft64_mul_assign_rt,
+            zq::{nega_cyclic_intt_in_place, nega_cyclic_ntt_in_place, nega_cyclic_ntt_mul_assign},
+        },
+        karatsuba::nega_cyclic_karatsuba_mul_assign,
     },
+    torus::T64,
     zq::{impl_rest_op_by_op_assign_ref, is_prime, Zq},
 };
 use core::{
@@ -14,16 +19,17 @@ use core::{
     fmt::{self, Debug, Display, Formatter},
     iter::Sum,
     marker::PhantomData,
-    ops::{AddAssign, BitXor, Mul, MulAssign, Neg, SubAssign},
+    ops::{AddAssign, BitXor, Mul, MulAssign, Neg},
     slice,
 };
 use derive_more::{AsMut, AsRef, Deref, DerefMut};
-use itertools::izip;
+use itertools::Itertools;
 use num_bigint::{BigInt, BigUint};
 use rand::{distributions::Distribution, RngCore};
 use std::vec;
 
 pub mod fft;
+pub mod karatsuba;
 pub mod rns;
 
 pub trait Basis: Clone + Copy + Debug + PartialEq + Eq {}
@@ -39,6 +45,7 @@ pub struct Evaluation;
 impl Basis for Evaluation {}
 
 pub type Rq<B = Coefficient> = NegaCyclicRing<Zq, B>;
+pub type Rt<B = Coefficient> = NegaCyclicRing<T64, B>;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deref, DerefMut, AsRef, AsMut)]
 pub struct NegaCyclicRing<T, B: Basis = Coefficient>(
@@ -84,7 +91,7 @@ impl<B: Basis> NegaCyclicRing<Zq, B> {
     }
 
     pub fn sample_uniform(q: u64, n: usize, rng: &mut impl RngCore) -> Self {
-        Self::new(AVec::sample_uniform(q, n, rng))
+        Self::new(AVec::<Zq>::sample_uniform(q, n, rng))
     }
 
     pub fn mod_switch(&self, q_prime: u64) -> Self {
@@ -134,6 +141,38 @@ impl NegaCyclicRing<Zq, Coefficient> {
         let mut a = self.0.clone();
         nega_cyclic_ntt_in_place(&mut a);
         NegaCyclicRing::new(a)
+    }
+}
+
+impl<B: Basis> NegaCyclicRing<T64, B> {
+    pub fn zero(n: usize) -> Self {
+        Self::new(vec![T64::zero(); n].into())
+    }
+
+    pub fn sample_uniform(n: usize, rng: &mut impl RngCore) -> Self {
+        Self::new(AVec::<T64>::sample_uniform(n, rng))
+    }
+}
+
+impl NegaCyclicRing<T64, Coefficient> {
+    pub fn one(n: usize) -> Self {
+        let mut poly = Self::zero(n);
+        poly[0] += 1;
+        poly
+    }
+
+    pub fn constant(v: T64, n: usize) -> Self {
+        let mut poly = Self::zero(n);
+        poly[0] = v;
+        poly
+    }
+
+    pub fn sample_i64(n: usize, dist: impl Distribution<i64>, rng: &mut impl RngCore) -> Self {
+        Self::from_i64(&AVec::sample(n, dist, rng))
+    }
+
+    fn from_i64(v: &[i64]) -> Self {
+        Self::new(v.iter().copied().map_into().collect())
     }
 }
 
@@ -219,7 +258,7 @@ impl MulAssign<&NegaCyclicRing<Zq, Coefficient>> for NegaCyclicRing<Zq, Coeffici
         assert_eq!(self.n(), rhs.n());
         match is_prime(self.q()) {
             true => nega_cyclic_ntt_mul_assign(self, rhs),
-            false => *self = nega_cyclic_schoolbook_mul(self, rhs),
+            false => nega_cyclic_karatsuba_mul_assign::<Zq>(self, rhs),
         }
     }
 }
@@ -238,13 +277,13 @@ impl MulAssign<&AVec<i64>> for NegaCyclicRing<Zq, Coefficient> {
 
 impl MulAssign<&AVec<i64>> for NegaCyclicRing<Zq, Evaluation> {
     fn mul_assign(&mut self, rhs: &AVec<i64>) {
-        *self *= NegaCyclicRing::from_i64(self.q(), rhs).to_evaluation();
+        *self *= NegaCyclicRing::<Zq>::from_i64(self.q(), rhs).to_evaluation();
     }
 }
 
 impl MulAssign<&NegaCyclicRing<i64, Coefficient>> for NegaCyclicRing<i64, Coefficient> {
     fn mul_assign(&mut self, rhs: &NegaCyclicRing<i64, Coefficient>) {
-        *self = nega_cyclic_schoolbook_mul(self, rhs);
+        nega_cyclic_karatsuba_mul_assign::<i64>(self, rhs);
     }
 }
 
@@ -257,16 +296,32 @@ where
     }
 }
 
-impl MulAssign<&Monomial> for NegaCyclicRing<Zq> {
+impl<T> MulAssign<&Monomial> for NegaCyclicRing<T>
+where
+    for<'t> &'t T: Neg<Output = T>,
+{
     fn mul_assign(&mut self, rhs: &Monomial) {
         let n = self.n();
         let i = rhs.0.rem_euclid(2 * n as i64) as usize;
         self.rotate_right(i % n);
         if i < n {
-            self[..i].iter_mut().for_each(|v| *v = -*v);
+            self[..i].iter_mut().for_each(|v| *v = -&*v);
         } else {
-            self[i - n..].iter_mut().for_each(|v| *v = -*v);
+            self[i - n..].iter_mut().for_each(|v| *v = -&*v);
         }
+    }
+}
+
+impl MulAssign<&NegaCyclicRing<T64, Coefficient>> for NegaCyclicRing<T64, Coefficient> {
+    fn mul_assign(&mut self, rhs: &NegaCyclicRing<T64, Coefficient>) {
+        assert_eq!(self.n(), rhs.n());
+        nega_cyclic_fft64_mul_assign_rt(self, rhs)
+    }
+}
+
+impl MulAssign<&AVec<i64>> for NegaCyclicRing<T64, Coefficient> {
+    fn mul_assign(&mut self, rhs: &AVec<i64>) {
+        *self *= Self::from_i64(rhs);
     }
 }
 
@@ -310,17 +365,29 @@ impl_mul_element!(
     impl<T> Mul<T> for NegaCyclicRing<T, Evaluation>,
 );
 impl_rest_op_by_op_assign_ref!(
+    impl Mul<NegaCyclicRing<i64, Coefficient>> for NegaCyclicRing<i64, Coefficient>,
     impl Mul<NegaCyclicRing<Zq, Coefficient>> for NegaCyclicRing<Zq, Coefficient>,
     impl Mul<NegaCyclicRing<Zq, Evaluation>> for NegaCyclicRing<Zq, Evaluation>,
-    impl Mul<NegaCyclicRing<i64, Coefficient>> for NegaCyclicRing<i64, Coefficient>,
-    impl Mul<AVec<i64>> for NegaCyclicRing<Zq>,
-    impl Mul<BigUint> for NegaCyclicRing<Zq>,
+    impl Mul<AVec<i64>> for NegaCyclicRing<Zq, Coefficient>,
+    impl Mul<AVec<i64>> for NegaCyclicRing<Zq, Evaluation>,
     impl Mul<Monomial> for NegaCyclicRing<Zq>,
+    impl Mul<BigUint> for NegaCyclicRing<Zq>,
+    impl Mul<NegaCyclicRing<T64, Coefficient>> for NegaCyclicRing<T64, Coefficient>,
+    impl Mul<AVec<i64>> for NegaCyclicRing<T64, Coefficient>,
+    impl Mul<Monomial> for NegaCyclicRing<T64>,
 );
 
 pub struct Monomial(i64);
 
 pub struct X;
+
+impl BitXor<i64> for X {
+    type Output = Monomial;
+
+    fn bitxor(self, rhs: i64) -> Self::Output {
+        Monomial(rhs)
+    }
+}
 
 impl BitXor<&i64> for X {
     type Output = Monomial;
@@ -338,34 +405,39 @@ impl BitXor<Zq> for X {
     }
 }
 
-fn nega_cyclic_schoolbook_mul<T, V: AsRef<[T]> + AsMut<[T]> + FromIterator<T>>(a: &V, b: &V) -> V
-where
-    T: AddAssign<T> + SubAssign<T>,
-    for<'t> &'t T: Mul<&'t T, Output = T>,
-{
-    let (a, b) = (a.as_ref(), b.as_ref());
-    let n = a.len();
-    let mut c = a.iter().map(|a| a * &b[0]).collect::<V>();
-    izip!(0.., a.iter()).for_each(|(i, a)| {
-        izip!(0.., b.iter()).skip(1).for_each(|(j, b)| {
-            if i + j < n {
-                c.as_mut()[i + j] += a * b;
-            } else {
-                c.as_mut()[i + j - n] -= a * b;
-            }
-        })
-    });
-    c
-}
-
 #[cfg(test)]
-mod test {
+pub mod test {
     use crate::{
-        ring::{nega_cyclic_schoolbook_mul, Coefficient, Rq},
+        ring::{Coefficient, Rq},
         zq::two_adic_primes,
     };
-    use core::array::from_fn;
+    use core::{
+        array::from_fn,
+        ops::{AddAssign, Mul, SubAssign},
+    };
+    use itertools::izip;
     use rand::thread_rng;
+
+    pub fn nega_cyclic_schoolbook_mul<T, V>(a: &V, b: &V) -> V
+    where
+        T: AddAssign<T> + SubAssign<T>,
+        for<'t> &'t T: Mul<&'t T, Output = T>,
+        V: AsRef<[T]> + AsMut<[T]> + FromIterator<T>,
+    {
+        let (a, b) = (a.as_ref(), b.as_ref());
+        let n = a.len();
+        let mut c = a.iter().map(|a| a * &b[0]).collect::<V>();
+        izip!(0.., a.iter()).for_each(|(i, a)| {
+            izip!(0.., b.iter()).skip(1).for_each(|(j, b)| {
+                if i + j < n {
+                    c.as_mut()[i + j] += a * b;
+                } else {
+                    c.as_mut()[i + j - n] -= a * b;
+                }
+            })
+        });
+        c
+    }
 
     #[test]
     fn nega_cyclic_mul() {

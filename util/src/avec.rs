@@ -1,4 +1,4 @@
-use crate::{complex::C256, zq::Zq};
+use crate::{complex::C256, zq::Zq, T64};
 use core::{
     borrow::Borrow,
     fmt::{self, Display, Formatter},
@@ -68,6 +68,16 @@ impl AVec<Zq> {
 
     pub fn q(&self) -> u64 {
         self[0].q()
+    }
+}
+
+impl AVec<T64> {
+    pub fn zero(n: usize) -> Self {
+        Self(vec![T64::default(); n])
+    }
+
+    pub fn sample_uniform(n: usize, rng: &mut impl RngCore) -> Self {
+        repeat_with(|| T64::sample_uniform(rng)).take(n).collect()
     }
 }
 
@@ -285,24 +295,27 @@ pub(crate) use {
     impl_mul_assign_element, impl_mul_element,
 };
 
-macro_rules! impl_avec_i64_mul_zq {
+macro_rules! impl_avec_i64_mul {
+    (@ impl Mul<$rhs:ty> for $lhs:ty; type Output = $out:ty) => {
+        impl core::ops::Mul<$rhs> for $lhs {
+            type Output = $out;
+
+            fn mul(self, rhs: $rhs) -> Self::Output {
+                self.iter().map(|v| rhs * v).collect()
+            }
+        }
+    };
     ($(impl Mul<$rhs:ty> for $lhs:ty),* $(,)?) => {
         $(
-            impl core::ops::Mul<$rhs> for $lhs {
-                type Output = AVec<Zq>;
-
-                fn mul(self, rhs: $rhs) -> AVec<Zq> {
-                    let q = rhs.q();
-                    self.iter().map(|v| Zq::from_i64(q, *v) * rhs).collect()
-                }
-            }
+            impl_avec_i64_mul!(@ impl Mul<$rhs> for $lhs; type Output = AVec<$rhs>);
+            impl_avec_i64_mul!(@ impl Mul<&$rhs> for $lhs; type Output = AVec<$rhs>);
+            impl_avec_i64_mul!(@ impl Mul<$rhs> for &$lhs; type Output = AVec<$rhs>);
+            impl_avec_i64_mul!(@ impl Mul<&$rhs> for &$lhs; type Output = AVec<$rhs>);
         )*
     };
 }
 
-impl_avec_i64_mul_zq!(
+impl_avec_i64_mul!(
     impl Mul<Zq> for AVec<i64>,
-    impl Mul<&Zq> for AVec<i64>,
-    impl Mul<Zq> for &AVec<i64>,
-    impl Mul<&Zq> for &AVec<i64>,
+    impl Mul<T64> for AVec<i64>,
 );

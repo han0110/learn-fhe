@@ -11,7 +11,7 @@ pub struct LweParam {
     q: u64,
     p: u64,
     n: usize,
-    decomposor: Option<Base2Decomposor>,
+    decomposor: Option<Base2Decomposor<Zq>>,
 }
 
 impl LweParam {
@@ -27,7 +27,7 @@ impl LweParam {
     }
 
     pub fn with_decomposor(mut self, log_b: usize, d: usize) -> Self {
-        self.decomposor = Some(Base2Decomposor::new(self.q(), log_b, d));
+        self.decomposor = Some(Base2Decomposor::<Zq>::new(self.q(), log_b, d));
         self
     }
 
@@ -47,7 +47,7 @@ impl LweParam {
         self.q as f64 / self.p as f64
     }
 
-    pub fn decomposor(&self) -> &Base2Decomposor {
+    pub fn decomposor(&self) -> &Base2Decomposor<Zq> {
         self.decomposor.as_ref().unwrap()
     }
 }
@@ -60,11 +60,11 @@ pub struct LweKeySwitchingKey(pub(crate) AVec<LweCiphertext>);
 
 impl LweKeySwitchingKey {
     pub fn a(&self) -> impl Iterator<Item = &AVec<Zq>> {
-        self.0.iter().map(|ct| ct.a())
+        self.0.iter().map(LweCiphertext::a)
     }
 
     pub fn b(&self) -> impl Iterator<Item = &Zq> {
-        self.0.iter().map(|ct| ct.b())
+        self.0.iter().map(LweCiphertext::b)
     }
 }
 
@@ -133,7 +133,7 @@ impl Lwe {
         LwePlaintext(pt): LwePlaintext,
         rng: &mut impl RngCore,
     ) -> LweCiphertext {
-        let a = AVec::sample_uniform(param.q(), param.n(), rng);
+        let a = AVec::<Zq>::sample_uniform(param.q(), param.n(), rng);
         let e = Zq::sample_i64(param.q(), dg(3.2, 6), rng);
         let b = a.dot(sk) + pt + e;
         LweCiphertext(a, b)

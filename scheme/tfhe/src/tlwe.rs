@@ -1,169 +1,193 @@
-use crate::util::{uniform_binaries, AdditiveVec, Dot, Round, TorusNormal, W64};
-use core::{iter::repeat_with, num::Wrapping};
+use derive_more::{Add, Sub};
+use itertools::Itertools;
 use rand::{distributions::Distribution, RngCore};
+use util::{binary, tdg, AVec, Base2Decomposable, Base2Decomposor, Dot, Zq, T64};
 
+#[derive(Debug)]
 pub struct Tlwe;
 
 #[derive(Clone, Copy, Debug)]
 pub struct TlweParam {
-    pub(crate) log_q: usize,
-    pub(crate) log_p: usize,
-    pub(crate) padding: usize,
-    pub(crate) n: usize,
-    pub(crate) m: usize,
-    pub(crate) t_normal: TorusNormal,
+    log_p: usize,
+    padding: usize,
+    n: usize,
+    std_dev: f64,
+    decomposor: Option<Base2Decomposor<T64>>,
 }
 
 impl TlweParam {
-    pub fn q(&self) -> W64 {
-        Wrapping(1 << self.log_q)
-    }
-
-    pub fn p(&self) -> W64 {
-        Wrapping(1 << self.log_p)
-    }
-
-    pub fn log_delta(&self) -> usize {
-        self.log_q - (self.log_p + self.padding)
-    }
-
-    pub fn delta(&self) -> W64 {
-        Wrapping(1 << self.log_delta())
-    }
-}
-
-pub struct TlweSecretKey(pub(crate) Vec<bool>);
-
-pub struct TlwePublicKey(AdditiveVec<AdditiveVec<W64>>, AdditiveVec<W64>);
-
-impl TlwePublicKey {
-    pub fn a(&self) -> &AdditiveVec<AdditiveVec<W64>> {
-        &self.0
-    }
-
-    pub fn b(&self) -> &AdditiveVec<W64> {
-        &self.1
-    }
-}
-
-pub struct TlwePlaintext(pub(crate) W64);
-
-pub struct TlweCiphertext(pub(crate) AdditiveVec<W64>, pub(crate) W64);
-
-impl TlweCiphertext {
-    pub fn a(&self) -> &AdditiveVec<W64> {
-        &self.0
-    }
-
-    pub fn b(&self) -> &W64 {
-        &self.1
-    }
-}
-
-impl Tlwe {
-    pub fn param_gen(
-        log_q: usize,
-        log_p: usize,
-        padding: usize,
-        n: usize,
-        m: usize,
-        std_dev: f64,
-    ) -> TlweParam {
+    pub fn new(log_p: usize, padding: usize, n: usize, std_dev: f64) -> Self {
         TlweParam {
-            log_q,
             log_p,
             padding,
             n,
-            m,
-            t_normal: TorusNormal::new(log_q, std_dev),
+            std_dev,
+            decomposor: None,
         }
     }
 
-    pub fn key_gen(param: &TlweParam, rng: &mut impl RngCore) -> (TlweSecretKey, TlwePublicKey) {
-        let sk = uniform_binaries(param.n, rng);
-        let pk = {
-            repeat_with(|| {
-                let a = AdditiveVec::uniform_q(param.q(), param.n, rng);
-                let e = param.t_normal.sample(rng);
-                let b = (a.dot(&sk) + e) % param.q();
-                (a, b)
-            })
-            .take(param.m)
-            .unzip()
-        };
-        (TlweSecretKey(sk), TlwePublicKey(pk.0, pk.1))
+    pub fn with_decomposor(mut self, log_b: usize, d: usize) -> Self {
+        self.decomposor = Some(Base2Decomposor::<T64>::new(log_b, d));
+        self
     }
 
-    pub fn encode(param: &TlweParam, m: &W64) -> TlwePlaintext {
-        assert!(*m < param.p());
-        TlwePlaintext(m << param.log_delta())
+    pub fn log_p(&self) -> usize {
+        self.log_p
     }
 
-    pub fn decode(param: &TlweParam, pt: &TlwePlaintext) -> W64 {
-        (pt.0 >> param.log_delta()) % param.p()
+    pub fn p(&self) -> u64 {
+        1 << self.log_p()
     }
 
-    pub fn encrypt(
+    pub fn padding(&self) -> usize {
+        self.padding
+    }
+
+    pub fn log_delta(&self) -> usize {
+        u64::BITS as usize - (self.log_p + self.padding)
+    }
+
+    pub fn n(&self) -> usize {
+        self.n
+    }
+
+    pub fn std_dev(&self) -> f64 {
+        self.std_dev
+    }
+
+    pub fn decomposor(&self) -> &Base2Decomposor<T64> {
+        self.decomposor.as_ref().unwrap()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TlweSecretKey(pub(crate) AVec<i64>);
+
+#[derive(Clone, Debug)]
+pub struct TlwePlaintext(pub(crate) T64);
+
+#[derive(Clone, Debug, Add, Sub)]
+pub struct TlweCiphertext(pub(crate) AVec<T64>, pub(crate) T64);
+
+impl TlweCiphertext {
+    pub fn a(&self) -> &AVec<T64> {
+        &self.0
+    }
+
+    pub fn b(&self) -> &T64 {
+        &self.1
+    }
+}
+
+impl TlweKeySwitchingKey {
+    pub fn a(&self) -> impl Iterator<Item = &AVec<T64>> {
+        self.0.iter().map(TlweCiphertext::a)
+    }
+
+    pub fn b(&self) -> impl Iterator<Item = &T64> {
+        self.0.iter().map(TlweCiphertext::b)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TlweKeySwitchingKey(AVec<TlweCiphertext>);
+
+impl Tlwe {
+    pub fn sk_gen(param: &TlweParam, rng: &mut impl RngCore) -> TlweSecretKey {
+        TlweSecretKey(AVec::sample(param.n(), binary(), rng))
+    }
+
+    pub fn ksk_gen(
         param: &TlweParam,
-        pk: &TlwePublicKey,
-        pt: &TlwePlaintext,
+        sk0: &TlweSecretKey,
+        TlweSecretKey(sk1): &TlweSecretKey,
+        rng: &mut impl RngCore,
+    ) -> TlweKeySwitchingKey {
+        let pt = param.decomposor().power_up(-sk1).flatten();
+        let ksk = pt
+            .map(|pt| Tlwe::sk_encrypt(param, sk0, TlwePlaintext(pt), rng))
+            .collect();
+        TlweKeySwitchingKey(ksk)
+    }
+
+    pub fn encode(param: &TlweParam, m: Zq) -> TlwePlaintext {
+        assert!(m.q() == param.p());
+        TlwePlaintext((m.to_u64() << param.log_delta()).into())
+    }
+
+    pub fn decode(param: &TlweParam, TlwePlaintext(pt): TlwePlaintext) -> Zq {
+        Zq::from_u64(param.p(), pt.to_u64() >> param.log_delta())
+    }
+
+    pub fn sk_encrypt(
+        param: &TlweParam,
+        TlweSecretKey(sk): &TlweSecretKey,
+        TlwePlaintext(pt): TlwePlaintext,
         rng: &mut impl RngCore,
     ) -> TlweCiphertext {
-        let r = uniform_binaries(param.m, rng);
-        let a = (pk.a().dot(&r)) % param.q();
-        let b = (pk.b().dot(&r) + pt.0) % param.q();
+        let a = AVec::<T64>::sample_uniform(param.n(), rng);
+        let e = tdg(param.std_dev()).sample(rng);
+        let b = a.dot(sk) + e + pt;
         TlweCiphertext(a, b)
     }
 
-    pub fn decrypt(param: &TlweParam, sk: &TlweSecretKey, ct: &TlweCiphertext) -> TlwePlaintext {
-        let TlweCiphertext(a, b) = ct;
-        let mu_star = (b - a.dot(&sk.0)) % param.q();
+    pub fn decrypt(
+        param: &TlweParam,
+        TlweSecretKey(sk): &TlweSecretKey,
+        TlweCiphertext(a, b): TlweCiphertext,
+    ) -> TlwePlaintext {
+        let mu_star = b - a.dot(sk);
         let mu = mu_star.round(param.log_delta());
         TlwePlaintext(mu)
     }
 
-    pub fn eval_add(
+    pub fn key_switch(
         param: &TlweParam,
-        ct1: &TlweCiphertext,
-        ct2: &TlweCiphertext,
+        ksk: &TlweKeySwitchingKey,
+        ct: TlweCiphertext,
     ) -> TlweCiphertext {
-        TlweCiphertext(
-            (ct1.a() + ct2.a()) % param.q(),
-            (ct1.b() + ct2.b()) % param.q(),
-        )
-    }
-
-    pub fn eval_sub(
-        param: &TlweParam,
-        ct1: &TlweCiphertext,
-        ct2: &TlweCiphertext,
-    ) -> TlweCiphertext {
-        TlweCiphertext(
-            (ct1.a() - ct2.a()) % param.q(),
-            (ct1.b() - ct2.b()) % param.q(),
-        )
+        let ct_a_limbs = param.decomposor().decompose(ct.a()).flatten().collect_vec();
+        let a = ksk.a().dot(&ct_a_limbs);
+        let b = ksk.b().dot(&ct_a_limbs) + ct.b();
+        TlweCiphertext(a, b)
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::tlwe::Tlwe;
-    use core::num::Wrapping;
-    use rand::{
-        rngs::{OsRng, StdRng},
-        RngCore, SeedableRng,
-    };
+    use crate::tlwe::{Tlwe, TlweParam};
+    use rand::thread_rng;
+    use util::Zq;
 
     #[test]
     fn encrypt_decrypt() {
-        let mut rng = StdRng::seed_from_u64(OsRng.next_u64());
-        let (log_q, log_p, padding, n, m, std_dev) = (32, 8, 1, 256, 32, 1.0e-08);
-        let param = Tlwe::param_gen(log_q, log_p, padding, n, m, std_dev);
-        let (sk, pk) = Tlwe::key_gen(&param, &mut rng);
-        for m in (0..1 << log_p).map(Wrapping) {
-            let pt = Tlwe::encode(&param, &m);
-            let ct = Tlwe::encrypt(&param, &pk, &pt, &mut rng);
-            assert_eq!(m, Tlwe::decode(&param, &Tlwe::decrypt(&param, &sk, &ct)));
+        let mut rng = thread_rng();
+        let (log_p, padding, n, std_dev) = (8, 1, 256, 1.0e-8);
+        let param = TlweParam::new(log_p, padding, n, std_dev);
+        let sk = Tlwe::sk_gen(&param, &mut rng);
+        for m in 0..param.p() {
+            let m = Zq::from_u64(param.p(), m);
+            let pt = Tlwe::encode(&param, m);
+            let ct = Tlwe::sk_encrypt(&param, &sk, pt.clone(), &mut rng);
+            assert_eq!(m, Tlwe::decode(&param, Tlwe::decrypt(&param, &sk, ct)));
+        }
+    }
+
+    #[test]
+    fn key_switch() {
+        let mut rng = thread_rng();
+        let (log_p, padding, n, std_dev, log_b, d) = (8, 1, 256, 1.0e-8, 8, 8);
+        let param0 = TlweParam::new(log_p, padding, n, std_dev);
+        let param1 = TlweParam::new(log_p, padding, n, std_dev).with_decomposor(log_b, d);
+        let sk0 = Tlwe::sk_gen(&param0, &mut rng);
+        let sk1 = Tlwe::sk_gen(&param1, &mut rng);
+        let ksk = Tlwe::ksk_gen(&param1, &sk1, &sk0, &mut rng);
+        for m in 0..param0.p() {
+            let m = Zq::from_u64(param0.p(), m);
+            let pt = Tlwe::encode(&param0, m);
+            let ct0 = Tlwe::sk_encrypt(&param0, &sk0, pt, &mut rng);
+            let ct1 = Tlwe::key_switch(&param1, &ksk, ct0);
+            assert_eq!(m, Tlwe::decode(&param1, Tlwe::decrypt(&param1, &sk1, ct1)));
         }
     }
 }

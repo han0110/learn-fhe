@@ -1,167 +1,150 @@
 use crate::{
-    tggsw::{Tggsw, TggswCiphertext, TggswParam, TggswPublicKey, TggswSecretKey},
-    tglwe::Tglwe,
-    tlwe::{Tlwe, TlweCiphertext, TlweParam, TlwePlaintext, TlwePublicKey, TlweSecretKey},
-    util::{AdditiveVec, Decompose, Dot, Polynomial, Round, W64},
+    tggsw::{Tggsw, TggswCiphertext, TggswParam, TggswPlaintext},
+    tglwe::{Tglwe, TglweCiphertext, TglweParam},
+    tlwe::{Tlwe, TlweCiphertext, TlweKeySwitchingKey, TlweParam, TlweSecretKey},
 };
-use core::num::Wrapping;
-use itertools::chain;
+use derive_more::Deref;
+use itertools::Itertools;
 use rand::RngCore;
+use util::{izip_eq, AVec, Base2Decomposable, Rq, Rt};
 
+#[derive(Debug)]
 pub struct Bootstrapping;
 
+#[derive(Clone, Copy, Debug, Deref)]
 pub struct BootstrappingParam {
+    #[deref]
     tlwe: TlweParam,
     tggsw: TggswParam,
-    log_b: usize,
-    ell: usize,
 }
 
-pub struct BootstrappingKey(Vec<TggswCiphertext>, AdditiveVec<AdditiveVec<W64>>);
-
-impl Bootstrapping {
-    pub fn param_gen(
-        tlwe: TlweParam,
-        tggsw: TggswParam,
-        log_b: usize,
-        ell: usize,
-    ) -> BootstrappingParam {
-        BootstrappingParam {
-            tlwe,
-            tggsw,
-            log_b,
-            ell,
-        }
+impl BootstrappingParam {
+    pub fn new(tlwe: TlweParam, tggsw: TggswParam) -> Self {
+        assert_eq!(tlwe.p(), tggsw.p());
+        Self { tlwe, tggsw }
     }
 
+    pub fn tggsw(&self) -> &TggswParam {
+        &self.tggsw
+    }
+
+    pub fn tglwe(&self) -> &TglweParam {
+        self.tggsw()
+    }
+
+    pub fn big_n(&self) -> usize {
+        self.tggsw().big_n()
+    }
+}
+
+pub struct BootstrappingKey(AVec<TggswCiphertext>, TlweKeySwitchingKey);
+
+impl Bootstrapping {
     pub fn key_gen(
         param: &BootstrappingParam,
-        sk1: &TlweSecretKey,
-        pk1: &TlwePublicKey,
-        sk2: &TggswSecretKey,
-        pk2: &TggswPublicKey,
+        z: &TlweSecretKey,
         rng: &mut impl RngCore,
     ) -> BootstrappingKey {
-        let k1 = {
-            let param = &param.tggsw;
-            sk1.0
-                .iter()
-                .map(|b| {
-                    let b = Polynomial::constant(Wrapping(*b as u64), param.n);
-                    Tggsw::encrypt(param, pk2, &Tggsw::encode(param, &b), rng)
-                })
-                .collect()
-        };
-        let k2 = {
-            let (log_b, ell) = (param.log_b, param.ell);
-            let param = &param.tlwe;
-            sk2.0
-                .iter()
-                .flatten()
-                .flat_map(|b| (0..ell).map(|i| (*b as u64) << (param.log_q - (i + 1) * log_b)))
-                .map(|b| {
-                    let ct = Tlwe::encrypt(param, pk1, &TlwePlaintext(Wrapping(b)), rng);
-                    chain![ct.a(), [ct.b()]].copied().collect()
-                })
-                .collect()
-        };
-        BootstrappingKey(k1, k2)
+        let s = Tglwe::sk_gen(param.tggsw(), rng);
+        let brk =
+            z.0.iter()
+                .map(|&zi| Rt::constant(zi.into(), param.big_n()))
+                .map(|pt| Tggsw::sk_encrypt(param.tggsw(), &s, TggswPlaintext(pt), rng))
+                .collect();
+        let ksk = Tlwe::ksk_gen(param, z, &s, rng);
+        BootstrappingKey(brk, ksk)
     }
 
     pub fn bootstrap(
         param: &BootstrappingParam,
         bsk: &BootstrappingKey,
-        v: &Polynomial<W64>,
-        ct: &TlweCiphertext,
+        v: &Rq,
+        ct: TlweCiphertext,
     ) -> TlweCiphertext {
-        let ct = {
-            let param = &param.tggsw;
-            Tggsw::blind_rotate(param, &bsk.0, v, ct)
-        };
-        let ct = {
-            let param = &param.tggsw;
-            Tglwe::sample_extract(param, &ct, 0)
-        };
-        let ct = {
-            let (log_b, ell) = (param.log_b, param.ell);
-            let param = &param.tlwe;
-            let g_inv_a = ct
-                .a()
-                .iter()
-                .map(|a| a.round(param.log_q - log_b * ell))
-                .flat_map(|a| a.decompose(param.log_q, log_b).take(ell))
-                .collect::<AdditiveVec<_>>();
-            let composition = g_inv_a.dot(&bsk.1);
-            let (b, a) = composition.into_split_last().unwrap();
-            TlweCiphertext((-a) % param.q(), (ct.b() - b) % param.q())
-        };
-        ct
+        let ct = Bootstrapping::blind_rotate(param, &bsk.0, v, ct);
+        let ct = Tglwe::sample_extract(param.tggsw(), ct, 0);
+        Tlwe::key_switch(param, &bsk.1, ct)
     }
+
+    fn blind_rotate(
+        param: &BootstrappingParam,
+        brk: &[TggswCiphertext],
+        v: &Rq,
+        ct: TlweCiphertext,
+    ) -> TglweCiphertext {
+        let v = Tglwe::encode(param.tglwe(), v.clone());
+        let acc = TglweCiphertext::from((param.tglwe().n(), v));
+        let (a, b) = mod_switch(ct, param.big_n());
+        izip_eq!(brk, a).fold(acc.rotate(-b), |acc, (brk, a)| {
+            Tggsw::cmux(param.tggsw(), brk, acc.clone(), acc.rotate(a))
+        })
+    }
+}
+
+fn mod_switch(ct: TlweCiphertext, big_n: usize) -> (AVec<i64>, i64) {
+    let rounding_bits = u64::BITS as usize - (2 * big_n).ilog2() as usize;
+    let a = ct.a().rounding_shr(rounding_bits);
+    let b = ct.b().rounding_shr(rounding_bits);
+    (a.into_iter().map_into().collect(), b.into())
 }
 
 #[cfg(test)]
 mod test {
     use crate::{
-        bootstrapping::Bootstrapping,
-        tggsw::Tggsw,
-        tglwe::Tglwe,
-        tlwe::Tlwe,
-        util::{Polynomial, W64},
+        bootstrapping::{Bootstrapping, BootstrappingParam},
+        tggsw::TggswParam,
+        tlwe::{Tlwe, TlweParam},
     };
-    use core::{convert::identity, iter::repeat, num::Wrapping, ops::Neg};
-    use rand::{
-        rngs::{OsRng, StdRng},
-        RngCore, SeedableRng,
-    };
+    use core::{convert::identity, iter::repeat};
+    use itertools::{chain, Itertools};
+    use rand::thread_rng;
+    use util::{Rq, Zq};
 
-    fn programmable_poly(log_p: usize, n: usize, f: &impl Fn(W64) -> W64) -> Polynomial<W64> {
-        let p = Wrapping(1 << log_p);
-        let reps = n >> log_p;
-        let mut v = (0..1 << log_p)
-            .map(Wrapping)
-            .flat_map(|i| repeat(f(i) % p).take(reps))
-            .collect::<Polynomial<_>>();
-        v[0..reps >> 1].iter_mut().for_each(|v| *v = v.neg() % p);
-        v.rotate_left(reps >> 1);
-        v
+    fn table(log_p: usize, big_n: usize, f: impl Fn(Zq) -> Zq) -> Rq {
+        let p = 1 << log_p;
+        let m = big_n >> log_p;
+        let table = (0..p).map(|v| f(Zq::from_u64(p, v))).collect_vec();
+        chain![
+            repeat(table[0]).take(m / 2),
+            table[1..].iter().flat_map(|table| repeat(*table).take(m)),
+            repeat(-table[0]).take(m / 2),
+        ]
+        .collect()
     }
 
-    fn plus_3(i: W64) -> W64 {
-        i + Wrapping(3)
+    fn double(i: Zq) -> Zq {
+        i * 2
     }
 
-    fn double(i: W64) -> W64 {
-        i << 1
-    }
-
-    fn parity(i: W64) -> W64 {
-        i % Wrapping(2)
+    fn parity(i: Zq) -> Zq {
+        Zq::from_u64(i.q(), i.to_u64() % 2)
     }
 
     #[test]
     fn bootstrap() {
-        let mut rng = StdRng::seed_from_u64(OsRng.next_u64());
-        let (log_q, log_p, padding, k, n, m, std_dev, log_b, ell) =
-            (32, 3, 1, 1, 256, 32, 1.0e-8, 4, 8);
-        let param1 = Tlwe::param_gen(log_q, log_p, padding, n, m, std_dev);
-        let (sk1, pk1) = Tlwe::key_gen(&param1, &mut rng);
-        let param2 = Tggsw::param_gen(
-            Tglwe::param_gen(log_q, log_p, padding, k, n, m, std_dev),
-            log_b,
-            ell,
-        );
-        let (sk2, pk2) = Tggsw::key_gen(&param2, &mut rng);
-        let param3 = Bootstrapping::param_gen(param1, param2, log_b, ell);
-        let bsk = Bootstrapping::key_gen(&param3, &sk1, &pk1, &sk2, &pk2, &mut rng);
-        for f in [identity, plus_3, double, parity] {
-            let v = programmable_poly(log_p, n, &f);
-            for m in (0..1 << log_p).map(Wrapping) {
-                let ct1 = Tlwe::encrypt(&param1, &pk1, &Tlwe::encode(&param1, &m), &mut rng);
-                let ct2 = Bootstrapping::bootstrap(&param3, &bsk, &v, &ct1);
-                assert_eq!(
-                    f(m) % param1.p(),
-                    Tlwe::decode(&param1, &Tlwe::decrypt(&param1, &sk1, &ct2)),
-                )
+        let mut rng = thread_rng();
+        let param = {
+            let (log_p, padding) = (4, 1);
+            let tlwe = {
+                let (n, std_dev, log_b, d) = (1024, 1.339775301998614e-7, 4, 5);
+                TlweParam::new(log_p, padding, n, std_dev).with_decomposor(log_b, d)
+            };
+            let tggsw = {
+                let (big_n, n, std_dev, log_b, d) = (2048, 1, 2.845267479601915e-15, 23, 1);
+                TggswParam::new(log_p, padding, big_n, n, std_dev, log_b, d)
+            };
+            BootstrappingParam::new(tlwe, tggsw)
+        };
+        let z = Tlwe::sk_gen(&param, &mut rng);
+        let brk = Bootstrapping::key_gen(&param, &z, &mut rng);
+        for f in [identity, double, parity] {
+            let v = table(param.log_p(), param.big_n(), f);
+            for m in 0..param.p() {
+                let m = Zq::from_u64(param.p(), m);
+                let pt = Tlwe::encode(&param, m);
+                let ct0 = Tlwe::sk_encrypt(&param, &z, pt, &mut rng);
+                let ct1 = Bootstrapping::bootstrap(&param, &brk, &v, ct0);
+                assert_eq!(f(m), Tlwe::decode(&param, Tlwe::decrypt(&param, &z, ct1)),)
             }
         }
     }
