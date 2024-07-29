@@ -37,7 +37,23 @@ impl BootstrappingParam {
     }
 }
 
-pub struct BootstrappingKey(AVec<TggswCiphertext>, TlweKeySwitchingKey);
+#[derive(Clone, Debug, Deref)]
+pub struct BootstrappingKey {
+    #[deref]
+    param: BootstrappingParam,
+    brk: AVec<TggswCiphertext>,
+    ksk: TlweKeySwitchingKey,
+}
+
+impl BootstrappingKey {
+    fn brk(&self) -> &[TggswCiphertext] {
+        &self.brk
+    }
+
+    fn ksk(&self) -> &TlweKeySwitchingKey {
+        &self.ksk
+    }
+}
 
 impl Bootstrapping {
     pub fn key_gen(
@@ -52,18 +68,17 @@ impl Bootstrapping {
                 .map(|pt| Tggsw::sk_encrypt(param.tggsw(), &s, TggswPlaintext(pt), rng))
                 .collect();
         let ksk = Tlwe::ksk_gen(param, z, &s, rng);
-        BootstrappingKey(brk, ksk)
+        BootstrappingKey {
+            param: *param,
+            brk,
+            ksk,
+        }
     }
 
-    pub fn bootstrap(
-        param: &BootstrappingParam,
-        bsk: &BootstrappingKey,
-        v: &Rq,
-        ct: TlweCiphertext,
-    ) -> TlweCiphertext {
-        let ct = Bootstrapping::blind_rotate(param, &bsk.0, v, ct);
-        let ct = Tglwe::sample_extract(param.tggsw(), ct, 0);
-        Tlwe::key_switch(param, &bsk.1, ct)
+    pub fn bootstrap(bsk: &BootstrappingKey, v: &Rq, ct: TlweCiphertext) -> TlweCiphertext {
+        let ct = Bootstrapping::blind_rotate(bsk, bsk.brk(), v, ct);
+        let ct = Tglwe::sample_extract(bsk.tggsw(), ct, 0);
+        Tlwe::key_switch(bsk, bsk.ksk(), ct)
     }
 
     fn blind_rotate(
@@ -143,7 +158,7 @@ mod test {
                 let m = Zq::from_u64(param.p(), m);
                 let pt = Tlwe::encode(&param, m);
                 let ct0 = Tlwe::sk_encrypt(&param, &z, pt, &mut rng);
-                let ct1 = Bootstrapping::bootstrap(&param, &brk, &v, ct0);
+                let ct1 = Bootstrapping::bootstrap(&brk, &v, ct0);
                 assert_eq!(f(m), Tlwe::decode(&param, Tlwe::decrypt(&param, &z, ct1)),)
             }
         }
