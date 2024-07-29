@@ -1,7 +1,7 @@
 use crate::{
     complex::C64,
     misc::bit_reverse,
-    ring::fft::{nega_cyclic_fft_in_place, nega_cyclic_ifft_in_place},
+    ring::fft::{fft_in_place, ifft_in_place},
     torus::T64,
 };
 use core::f64::consts::PI;
@@ -9,42 +9,79 @@ use itertools::{izip, Itertools};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 pub fn nega_cyclic_fft64_mul_assign_rt(a: &mut [T64], b: &[T64]) {
-    let torus_to_c64 = |a: &T64| a.to_f64().into();
-    let integ_to_c64 = |b: &T64| (b.to_i64() as f64).into();
-    let c64_to_torus = |c: C64| c.re.into();
-    nega_cyclic_fft64_mul_assign(a, b, torus_to_c64, integ_to_c64, c64_to_torus);
+    if a.len() == 1 {
+        a[0] *= b[0];
+        return;
+    }
+    nega_cyclic_fft64_mul_assign(
+        a,
+        b,
+        to_c64_twisted::<true>,
+        to_c64_twisted::<false>,
+        assign_from_c64_twisted,
+    );
+}
+
+// Formula 8 in 2021/480.
+fn to_c64_twisted<const SCALE: bool>(a: &[T64]) -> Vec<C64> {
+    let n = a.len();
+    let [twiddle, _, _, _] = &*twiddle(n);
+    let (lo, hi) = a.split_at(n / 2);
+    let t = twiddle.iter().step_by(twiddle.len() / n);
+    izip!(lo, hi, t)
+        .map(|(lo, hi, t)| {
+            if SCALE {
+                C64::new(lo.to_f64(), hi.to_f64()) * t
+            } else {
+                C64::new(lo.to_i64() as _, hi.to_i64() as _) * t
+            }
+        })
+        .collect()
+}
+
+// Formula 10 in 2021/480.
+fn assign_from_c64_twisted(a: &mut [T64], c: Vec<C64>) {
+    let n = a.len();
+    let [_, twiddle_inv, _, _] = &*twiddle(n);
+    let (lo, hi) = a.split_at_mut(n / 2);
+    let t = twiddle_inv.iter().step_by(twiddle_inv.len() / n);
+    izip!(lo, hi, t, c).for_each(|(lo, hi, t, mut c): (_, &mut _, _, _)| {
+        c *= t;
+        *lo = c.re.into();
+        *hi = c.im.into();
+    });
 }
 
 pub fn nega_cyclic_fft64_mul_assign<T>(
     a: &mut [T],
     b: &[T],
-    a_to_c64: impl Fn(&T) -> C64,
-    b_to_c64: impl Fn(&T) -> C64,
-    from_c64: impl Fn(C64) -> T,
+    a_to_c64: impl Fn(&[T]) -> Vec<C64>,
+    b_to_c64: impl Fn(&[T]) -> Vec<C64>,
+    assign_from_c64: impl Fn(&mut [T], Vec<C64>),
 ) {
-    let mut ca = a.iter().map(a_to_c64).collect_vec();
-    let mut cb = b.iter().map(b_to_c64).collect_vec();
+    let mut ca = a_to_c64(a);
+    let mut cb = b_to_c64(b);
     nega_cyclic_fft64_in_place(&mut ca);
     nega_cyclic_fft64_in_place(&mut cb);
     izip!(ca.iter_mut(), cb.iter()).for_each(|(a, b)| *a *= b);
     nega_cyclic_ifft64_in_place(&mut ca);
-    izip!(a, ca).for_each(|(a, ca)| *a = from_c64(ca));
+    assign_from_c64(a, ca);
 }
 
 pub fn nega_cyclic_fft64_in_place(a: &mut [C64]) {
-    let [twiddle, _] = &*twiddle(a.len());
-    nega_cyclic_fft_in_place(a, twiddle)
+    let [_, _, twiddle_bo, _] = &*twiddle(a.len());
+    fft_in_place(a, twiddle_bo)
 }
 
 pub fn nega_cyclic_ifft64_in_place(a: &mut [C64]) {
-    let [_, twiddle_inv] = &*twiddle(a.len());
-    let n_inv = C64::new(1.0 / a.len() as f64, 0.);
-    nega_cyclic_ifft_in_place(a, twiddle_inv, &n_inv)
+    let [_, _, _, twiddle_inv_bo] = &*twiddle(a.len());
+    let n_inv = 1f64 / a.len() as f64;
+    ifft_in_place(a, twiddle_inv_bo, &n_inv)
 }
 
-// Twiddle factors in bit-reversed order.
-fn twiddle<'a>(n: usize) -> MutexGuard<'a, [Vec<C64>; 2]> {
-    static TWIDDLE: OnceLock<Mutex<[Vec<C64>; 2]>> = OnceLock::new();
+// Twiddle factors in normal and bit-reversed order.
+fn twiddle<'a>(n: usize) -> MutexGuard<'a, [Vec<C64>; 4]> {
+    static TWIDDLE: OnceLock<Mutex<[Vec<C64>; 4]>> = OnceLock::new();
     let mut twiddle = TWIDDLE.get_or_init(Default::default).lock().unwrap();
     if twiddle[0].len() < n {
         *twiddle = compute_twiddle(n);
@@ -52,12 +89,17 @@ fn twiddle<'a>(n: usize) -> MutexGuard<'a, [Vec<C64>; 2]> {
     twiddle
 }
 
-fn compute_twiddle(n: usize) -> [Vec<C64>; 2] {
+fn compute_twiddle(n: usize) -> [Vec<C64>; 4] {
     let twiddle = (0..n)
         .map(|i| C64::cis((i as f64 * PI) / n as f64))
         .collect_vec();
-    let twiddle_inv = twiddle.iter().map(C64::conj).collect();
-    [bit_reverse(twiddle), bit_reverse(twiddle_inv)]
+    let twiddle_inv = twiddle.iter().map(C64::conj).collect_vec();
+    [
+        twiddle.clone(),
+        twiddle_inv.clone(),
+        bit_reverse(twiddle),
+        bit_reverse(twiddle_inv),
+    ]
 }
 
 #[cfg(test)]
@@ -110,7 +152,7 @@ mod test {
         let mut rng = thread_rng();
         for log_n in 0..10 {
             let n = 1 << log_n;
-            let q = 1u64 << (f64::MANTISSA_DIGITS - 1 - log_n);
+            let q = 1u64 << (f64::MANTISSA_DIGITS - log_n);
             let uniform = Uniform::new(0, q).map(|v| v as f64);
             for _ in 0..1000 {
                 let a = AVec::sample(n, &uniform, &mut rng);
@@ -124,7 +166,7 @@ mod test {
         let mut rng = thread_rng();
         for log_n in 0..10 {
             let n = 1 << log_n;
-            let q = 1u64 << ((f64::MANTISSA_DIGITS - 2 - log_n) / 2);
+            let q = 1u64 << ((f64::MANTISSA_DIGITS - 3 - log_n) / 2);
             let uniform = Uniform::new(0, q).map(T64::from);
             for _ in 0..1000 {
                 let [a, b] = &from_fn(|_| AVec::sample(n, &uniform, &mut rng));

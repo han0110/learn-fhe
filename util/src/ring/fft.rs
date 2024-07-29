@@ -4,38 +4,72 @@ use itertools::izip;
 pub mod c64;
 pub mod zq;
 
-// Algorithm 1 in 2016/504.
-fn nega_cyclic_fft_in_place<T: Butterfly>(a: &mut [T], twiddle: &[T]) {
+// Given normal order input and bit-reversed order twiddle factors,
+// compute bit-reversed order output in place.
+fn fft_in_place<T: Butterfly>(a: &mut [T], twiddle_bo: &[T]) {
     assert!(a.len().is_power_of_two());
-    for log_m in 0..a.len().ilog2() {
-        let m = 1 << log_m;
-        let t = a.len() / m;
-        izip!(0.., a.chunks_exact_mut(t), &twiddle[m..]).for_each(|(i, a, twiddle)| {
-            let (u, v) = a.split_at_mut(t / 2);
+    for layer in (0..a.len().ilog2()).rev() {
+        let size = 1 << layer;
+        izip!(a.chunks_mut(2 * size), twiddle_bo).for_each(|(values, twiddle)| {
+            let (a, b) = values.split_at_mut(size);
+            izip!(a, b).for_each(|(a, b): (_, &mut _)| Butterfly::dit(a, b, twiddle));
+        });
+    }
+}
+
+// Given bit-reversed order input and bit-reversed order twiddle factors,
+// compute normal order output in place.
+fn ifft_in_place<T, S>(a: &mut [T], twiddle_inv_bo: &[T], n_inv: &S)
+where
+    T: Butterfly + for<'t> MulAssign<&'t S>,
+{
+    assert!(a.len().is_power_of_two());
+    for layer in 0..a.len().ilog2() {
+        let size = 1 << layer;
+        izip!(a.chunks_mut(2 * size), twiddle_inv_bo).for_each(|(values, twiddle)| {
+            let (a, b) = values.split_at_mut(size);
+            izip!(a, b).for_each(|(a, b): (_, &mut _)| Butterfly::dif(a, b, twiddle));
+        });
+    }
+    a.iter_mut().for_each(|a| *a *= n_inv);
+}
+
+// Algorithm 1 in 2016/504.
+// Given normal order input and bit-reversed order twiddle factors,
+// compute bit-reversed order output in place.
+fn nega_cyclic_fft_in_place<T: Butterfly>(a: &mut [T], twiddle_bo: &[T]) {
+    assert!(a.len().is_power_of_two());
+    let log_n = a.len().ilog2();
+    for layer in 0..log_n {
+        let (m, size) = (1 << layer, 1 << (log_n - layer - 1));
+        izip!(0.., a.chunks_exact_mut(2 * size), &twiddle_bo[m..]).for_each(|(i, a, t)| {
+            let (u, v) = a.split_at_mut(size);
             if m == 0 && i == 0 {
                 izip!(u, v).for_each(|(u, v)| Butterfly::twiddle_free(u, v));
             } else {
-                izip!(u, v).for_each(|(u, v)| Butterfly::dit(u, v, twiddle));
+                izip!(u, v).for_each(|(u, v)| Butterfly::dit(u, v, t));
             }
         });
     }
 }
 
 // Algorithm 2 in 2016/504.
-fn nega_cyclic_ifft_in_place<T>(a: &mut [T], twiddle_inv: &[T], n_inv: &T)
+// Given bit-reversed order input and bit-reversed order twiddle factors,
+// compute normal order output in place.
+fn nega_cyclic_ifft_in_place<T>(a: &mut [T], twiddle_inv_bo: &[T], n_inv: &T)
 where
     T: Butterfly + for<'t> MulAssign<&'t T>,
 {
     assert!(a.len().is_power_of_two());
-    for log_m in (0..a.len().ilog2()).rev() {
-        let m = 1 << log_m;
-        let t = a.len() / m;
-        izip!(0.., a.chunks_exact_mut(t), &twiddle_inv[m..]).for_each(|(i, a, twiddle_inv)| {
-            let (u, v) = a.split_at_mut(t / 2);
+    let log_n = a.len().ilog2();
+    for layer in (0..log_n).rev() {
+        let (m, size) = (1 << layer, 1 << (log_n - layer - 1));
+        izip!(0.., a.chunks_exact_mut(2 * size), &twiddle_inv_bo[m..]).for_each(|(i, a, t)| {
+            let (u, v) = a.split_at_mut(size);
             if m == 0 && i == 0 {
                 izip!(u, v).for_each(|(u, v)| Butterfly::twiddle_free(u, v));
             } else {
-                izip!(u, v).for_each(|(u, v)| Butterfly::dif(u, v, twiddle_inv));
+                izip!(u, v).for_each(|(u, v)| Butterfly::dif(u, v, t));
             }
         });
     }
