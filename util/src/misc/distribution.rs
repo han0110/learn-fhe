@@ -47,5 +47,8 @@ pub fn dg(std_dev: f64, n: usize) -> impl Distribution<i64> {
 }
 
 pub fn tdg(std_dev: f64) -> impl Distribution<T64> {
-    Normal::new(0., std_dev).unwrap().map(T64::from)
+    Normal::new(0., std_dev).unwrap().map(|v| {
+        let frac = v - v.round();
+        T64::from((frac * 2.0f64.powi(u64::BITS as _)).round() as i64)
+    })
 }

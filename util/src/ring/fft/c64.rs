@@ -13,29 +13,17 @@ pub fn nega_cyclic_fft64_mul_assign_rt(a: &mut [T64], b: &[T64]) {
         a[0] *= b[0];
         return;
     }
-    nega_cyclic_fft64_mul_assign(
-        a,
-        b,
-        to_c64_twisted::<true>,
-        to_c64_twisted::<false>,
-        assign_from_c64_twisted,
-    );
+    nega_cyclic_fft64_mul_assign(a, b, to_c64_twisted, assign_from_c64_twisted);
 }
 
 // Formula 8 in 2021/480.
-fn to_c64_twisted<const SCALE: bool>(a: &[T64]) -> Vec<C64> {
+fn to_c64_twisted(a: &[T64]) -> Vec<C64> {
     let n = a.len();
     let [twiddle, _, _, _] = &*twiddle(n);
     let (lo, hi) = a.split_at(n / 2);
     let t = twiddle.iter().step_by(twiddle.len() / n);
     izip!(lo, hi, t)
-        .map(|(lo, hi, t)| {
-            if SCALE {
-                C64::new(lo.to_f64(), hi.to_f64()) * t
-            } else {
-                C64::new(lo.to_i64() as _, hi.to_i64() as _) * t
-            }
-        })
+        .map(|(lo, hi, t)| C64::new(lo.to_i64() as _, hi.to_i64() as _) * t)
         .collect()
 }
 
@@ -47,20 +35,19 @@ fn assign_from_c64_twisted(a: &mut [T64], c: Vec<C64>) {
     let t = twiddle_inv.iter().step_by(twiddle_inv.len() / n);
     izip!(lo, hi, t, c).for_each(|(lo, hi, t, mut c): (_, &mut _, _, _)| {
         c *= t;
-        *lo = c.re.into();
-        *hi = c.im.into();
+        *lo = T64::from(f64_mod_u64(c.re));
+        *hi = T64::from(f64_mod_u64(c.im));
     });
 }
 
 pub fn nega_cyclic_fft64_mul_assign<T>(
     a: &mut [T],
     b: &[T],
-    a_to_c64: impl Fn(&[T]) -> Vec<C64>,
-    b_to_c64: impl Fn(&[T]) -> Vec<C64>,
+    to_c64: impl Fn(&[T]) -> Vec<C64>,
     assign_from_c64: impl Fn(&mut [T], Vec<C64>),
 ) {
-    let mut ca = a_to_c64(a);
-    let mut cb = b_to_c64(b);
+    let mut ca = to_c64(a);
+    let mut cb = to_c64(b);
     nega_cyclic_fft64_in_place(&mut ca);
     nega_cyclic_fft64_in_place(&mut cb);
     izip!(ca.iter_mut(), cb.iter()).for_each(|(a, b)| *a *= b);
@@ -77,6 +64,24 @@ pub fn nega_cyclic_ifft64_in_place(a: &mut [C64]) {
     let [_, _, _, twiddle_inv_bo] = &*twiddle(a.len());
     let n_inv = 1f64 / a.len() as f64;
     ifft_in_place(a, twiddle_inv_bo, &n_inv)
+}
+
+#[inline(always)]
+fn f64_mod_u64(v: f64) -> u64 {
+    let bits = v.to_bits();
+    let sign = bits >> 63;
+    let exponent = (bits >> 52) & 0x7ff;
+    let mantissa = (bits << 11) | 0x8000000000000000;
+    let value = match 1086 - exponent as i64 {
+        shift @ -63..=0 => mantissa << -shift,
+        shift @ 1..=64 => ((mantissa >> (shift - 1)).wrapping_add(1)) >> 1,
+        _ => 0,
+    };
+    if sign == 0 {
+        value
+    } else {
+        value.wrapping_neg()
+    }
 }
 
 // Twiddle factors in normal and bit-reversed order.

@@ -20,20 +20,15 @@ impl T64 {
         Self(rng.next_u64())
     }
 
-    pub fn from_f64(v: f64) -> Self {
-        let frac = v - v.round();
-        Self((frac * 2.0f64.powi(u64::BITS as _)).round() as i64 as _)
-    }
-
     pub fn to_f64(&self) -> f64 {
-        self.0 as i64 as f64 * 2.0f64.powi(-(u64::BITS as i32))
+        self.to_i64() as _
     }
 }
 
 impl From<f64> for T64 {
     #[inline(always)]
     fn from(value: f64) -> Self {
-        Self::from_f64(value)
+        Self::from(value.round() as i64)
     }
 }
 
